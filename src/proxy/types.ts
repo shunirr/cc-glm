@@ -3,7 +3,6 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { Config } from "../config/types.js";
 
 /** Upstream route target */
 export interface Route {

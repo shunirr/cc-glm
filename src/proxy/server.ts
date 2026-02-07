@@ -83,7 +83,7 @@ async function handleRequest(
       }
     }
     forwardHeaders["accept-encoding"] = "identity";
-    forwardHeaders["content-length"] = Buffer.byteLength(forwardBody);
+    forwardHeaders["content-length"] = String(Buffer.byteLength(forwardBody));
 
     // Replace authorization for z.ai
     if (target.name === "zai" && target.apiKey) {
@@ -117,7 +117,7 @@ async function handleRequest(
           proxyRes.on("end", () => {
             const body = Buffer.concat(chunks).toString();
             const transformed = transformThinkingBlocks(body);
-            resHeaders["content-length"] = Buffer.byteLength(transformed);
+            resHeaders["content-length"] = String(Buffer.byteLength(transformed));
             res.writeHead(proxyRes.statusCode || 200, resHeaders);
             res.end(transformed);
           });
