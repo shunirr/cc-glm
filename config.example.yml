@@ -15,7 +15,7 @@ upstream:
   # z.ai GLM API (for glm-* models)
   zai:
     url: "https://api.z.ai/api/anthropic"
-    apiKey: ""  # Optional, defaults to ZAI_API_KEY env var
+    apiKey: "YOUR_API_KEY" # Or falls back to ZAI_API_KEY env var
 
 # Lifecycle management
 lifecycle:

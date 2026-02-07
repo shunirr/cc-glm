@@ -32,8 +32,8 @@ Use `cc-glm` as a drop-in replacement for `claude`:
 cc-glm
 
 # Pass arguments to Claude Code
-cc-glm --help
-cc-glm ./my-project
+cc-glm -c
+cc-glm -p "PROMPT"
 ```
 
 The proxy automatically:
@@ -60,7 +60,7 @@ upstream:
   # z.ai GLM API
   zai:
     url: "https://api.z.ai/api/anthropic"
-    apiKey: ""  # Falls back to ZAI_API_KEY env var
+    apiKey: "YOUR_API_KEY" # Or falls back to ZAI_API_KEY env var
 
 lifecycle:
   stopGraceSeconds: 8
