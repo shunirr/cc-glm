@@ -10,6 +10,7 @@ import type { Config } from "../config/types.js";
 import type { Route } from "./types.js";
 import { selectRoute, parseRequestBody } from "./router.js";
 import { loadConfig } from "../config/loader.js";
+import { transformThinkingBlocks, shouldTransformResponse } from "./transform.js";
 
 /** Create and start the proxy server */
 export function createProxyServer(config: Config): Server {
@@ -104,8 +105,27 @@ async function handleRequest(
             resHeaders[key] = value;
           }
         }
-        res.writeHead(proxyRes.statusCode || 200, resHeaders);
-        proxyRes.pipe(res);
+
+        // Check if we need to transform the response
+        const contentType = proxyRes.headers["content-type"];
+        const needsTransform = shouldTransformResponse(contentType, target.name);
+
+        if (needsTransform) {
+          // Buffer the response for transformation
+          const chunks: Buffer[] = [];
+          proxyRes.on("data", (chunk) => chunks.push(chunk));
+          proxyRes.on("end", () => {
+            const body = Buffer.concat(chunks).toString();
+            const transformed = transformThinkingBlocks(body);
+            resHeaders["content-length"] = Buffer.byteLength(transformed);
+            res.writeHead(proxyRes.statusCode || 200, resHeaders);
+            res.end(transformed);
+          });
+        } else {
+          // Stream response directly without transformation
+          res.writeHead(proxyRes.statusCode || 200, resHeaders);
+          proxyRes.pipe(res);
+        }
       }
     );
 
