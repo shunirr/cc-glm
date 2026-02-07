@@ -9,7 +9,7 @@ import type { Config } from "../../src/config/types.js";
 const baseConfig: Config = {
   proxy: { port: 8787, host: "127.0.0.1" },
   upstream: {
-    anthropic: { url: "https://api.anthropic.com", apiKey: "sk-test" },
+    anthropic: { url: "https://api.anthropic.com" },
     zai: { url: "https://api.z.ai/api/anthropic", apiKey: "zai-test" },
   },
   lifecycle: {
@@ -24,7 +24,7 @@ const baseConfig: Config = {
   },
 };
 
-function configWithRules(rules: Config["routing"]["rules"], defaultUpstream = "anthropic"): Config {
+function configWithRules(rules: Config["routing"]["rules"], defaultUpstream: "anthropic" | "zai" = "anthropic"): Config {
   return {
     ...baseConfig,
     routing: { rules, default: defaultUpstream },
@@ -37,11 +37,13 @@ describe("selectRoute", () => {
       const result = selectRoute(undefined, baseConfig);
       expect(result.name).toBe("anthropic");
       expect(result.url).toBe("https://api.anthropic.com");
+      expect(result.apiKey).toBeUndefined();
     });
 
     it("routes any model to default upstream when no rules match", () => {
       const result = selectRoute("claude-sonnet-4-5-20250929", baseConfig);
       expect(result.name).toBe("anthropic");
+      expect(result.apiKey).toBeUndefined();
     });
   });
 
@@ -86,6 +88,7 @@ describe("selectRoute", () => {
       ]);
       const result = selectRoute("claude-sonnet-4-5-20250929", config);
       expect(result.name).toBe("anthropic");
+      expect(result.apiKey).toBeUndefined();
     });
 
     it("does not match partial pattern without wildcard", () => {
@@ -94,6 +97,7 @@ describe("selectRoute", () => {
       ]);
       const result = selectRoute("glm-4-plus", config);
       expect(result.name).toBe("anthropic");
+      expect(result.apiKey).toBeUndefined();
     });
   });
 
@@ -146,7 +150,7 @@ describe("selectRoute", () => {
       const result = selectRoute("unknown-model", config);
       expect(result.name).toBe("anthropic");
       expect(result.url).toBe("https://api.anthropic.com");
-      expect(result.apiKey).toBe("sk-test");
+      expect(result.apiKey).toBeUndefined();
     });
 
     it("uses zai as default when configured", () => {
@@ -168,10 +172,25 @@ describe("selectRoute", () => {
       expect(result.apiKey).toBe("zai-test");
     });
 
-    it("returns correct URL and apiKey for anthropic upstream", () => {
+    it("returns correct URL and no apiKey for anthropic upstream (OAuth)", () => {
       const result = selectRoute("claude-opus-4-0-20250514", baseConfig);
       expect(result.url).toBe("https://api.anthropic.com");
-      expect(result.apiKey).toBe("sk-test");
+      expect(result.apiKey).toBeUndefined();
+    });
+  });
+
+  describe("model-less requests", () => {
+    it("allows '*' pattern to match model-less requests", () => {
+      const config = configWithRules([
+        { match: "*", upstream: "zai" },
+      ]);
+      const result = selectRoute(undefined, config);
+      expect(result.name).toBe("zai");
+    });
+
+    it("falls back to default when model is undefined and no '*' rule exists", () => {
+      const result = selectRoute(undefined, baseConfig);
+      expect(result.name).toBe("anthropic");
     });
   });
 });

@@ -10,12 +10,23 @@ export interface ProxyConfig {
 
 /** Upstream API configuration */
 export interface UpstreamConfig {
-  anthropic: UpstreamEndpoint;
-  zai: UpstreamEndpoint;
+  anthropic: AnthropicUpstream;
+  zai: ZaiUpstream;
 }
 
-/** Single upstream endpoint configuration */
-export interface UpstreamEndpoint {
+/**
+ * Anthropic upstream configuration (OAuth-based)
+ * Note: apiKey is not used for Anthropic as it uses OAuth authorization header forwarding
+ */
+export interface AnthropicUpstream {
+  url: string;
+}
+
+/**
+ * z.ai upstream configuration (API key-based)
+ * The apiKey is used to set the x-api-key header for z.ai requests
+ */
+export interface ZaiUpstream {
   url: string;
   apiKey?: string;
 }
@@ -38,14 +49,14 @@ export interface LoggingConfig {
 /** Single routing rule */
 export interface RoutingRule {
   match: string;
-  upstream: string;
+  upstream: "anthropic" | "zai";
   model?: string;
 }
 
 /** Routing configuration */
 export interface RoutingConfig {
   rules: RoutingRule[];
-  default: string;
+  default: "anthropic" | "zai";
 }
 
 /** Complete configuration structure */

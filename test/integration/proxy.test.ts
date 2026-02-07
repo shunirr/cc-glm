@@ -9,7 +9,7 @@ import type { Config } from "../../src/config/types.js";
 const mockConfig: Config = {
   proxy: { port: 18787, host: "127.0.0.1" },
   upstream: {
-    anthropic: { url: "https://api.anthropic.com", apiKey: "sk-test" },
+    anthropic: { url: "https://api.anthropic.com" },
     zai: { url: "https://api.z.ai/api/anthropic", apiKey: "zai-test" },
   },
   lifecycle: {

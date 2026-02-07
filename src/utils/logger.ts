@@ -62,7 +62,7 @@ export class Logger {
   /** Log error message */
   error(message: string): void {
     if (this.shouldLog("error")) {
-      console.log(chalk.red(this.format("error", message)));
+      console.error(chalk.red(this.format("error", message)));
     }
   }
 }
