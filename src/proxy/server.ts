@@ -86,7 +86,7 @@ async function handleRequest(
     forwardHeaders["content-length"] = Buffer.byteLength(forwardBody);
 
     // Replace authorization for z.ai
-    if (target.name === "zai") {
+    if (target.name === "zai" && target.apiKey) {
       delete forwardHeaders["authorization"];
       forwardHeaders["x-api-key"] = target.apiKey;
     }

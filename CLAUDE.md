@@ -39,7 +39,7 @@ src/
 **Request flow:** CLI starts singleton proxy → proxy receives API requests → router matches model name against glob rules → request forwarded to Anthropic or z.ai with appropriate auth headers → z.ai responses are transformed for compatibility.
 
 **Auth header handling:**
-- Anthropic: forwards original `authorization` header
+- Anthropic: OAuth-based, forwards original `authorization` header as-is (no API key)
 - z.ai: removes `authorization`, adds `x-api-key` header
 
 ## Key Conventions
@@ -47,5 +47,5 @@ src/
 - **ESM-only** (`"type": "module"`): all imports use `.js` extensions even for `.ts` source files
 - **TypeScript strict mode**, target ES2022, Node.js >= 18
 - **Type definitions** are separated into `types.ts` files per module
-- **Config precedence:** config file > environment variables (`ANTHROPIC_API_KEY`, `ZAI_API_KEY`) > defaults
+- **Config precedence:** config file > environment variables (`ZAI_API_KEY`) > defaults
 - **Routing rules** use simple glob patterns (`*` only), evaluated top-to-bottom

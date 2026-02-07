@@ -9,7 +9,7 @@ import type { Config } from "../config/types.js";
 export interface Route {
   name: string;
   url: string;
-  apiKey: string;
+  apiKey?: string;
   model?: string;
 }
 

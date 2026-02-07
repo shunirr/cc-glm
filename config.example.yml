@@ -8,10 +8,9 @@ proxy:
 
 # Upstream API configuration
 upstream:
-  # Anthropic API (for non-GLM models)
+  # Anthropic API (OAuth, forwards authorization header as-is)
   anthropic:
     url: "https://api.anthropic.com"
-    apiKey: ""  # Optional, defaults to ANTHROPIC_API_KEY env var
 
   # z.ai GLM API (for glm-* models)
   zai:
@@ -37,15 +36,15 @@ logging:
 # Rules are evaluated top-to-bottom, first match wins
 routing:
   rules:
-    # Route Claude Sonnet requests to z.ai with glm-4-plus
+    # Route Claude Sonnet requests to z.ai with GLM-4.7
     - match: "claude-sonnet-*"
       upstream: zai
-      model: "glm-4-plus"
+      model: "GLM-4.7"
 
-    # Route Claude Haiku requests to z.ai with glm-4-flash
+    # Route Claude Haiku requests to z.ai with GLM-4.7
     - match: "claude-haiku-*"
       upstream: zai
-      model: "glm-4-flash"
+      model: "GLM-4.7"
 
     # Route GLM models to z.ai (keep original model name)
     - match: "glm-*"

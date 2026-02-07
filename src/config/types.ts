@@ -17,7 +17,7 @@ export interface UpstreamConfig {
 /** Single upstream endpoint configuration */
 export interface UpstreamEndpoint {
   url: string;
-  apiKey: string;
+  apiKey?: string;
 }
 
 /** Lifecycle management configuration */

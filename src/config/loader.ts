@@ -26,7 +26,6 @@ const DEFAULTS = {
   upstream: {
     anthropic: {
       url: "https://api.anthropic.com",
-      apiKey: "",
     },
     zai: {
       url: "https://api.z.ai/api/anthropic",
@@ -115,10 +114,6 @@ function mergeUpstreamConfig(raw?: Partial<UpstreamConfig>): UpstreamConfig {
   return {
     anthropic: {
       url: rawAnthropic?.url ?? DEFAULTS.upstream.anthropic.url,
-      apiKey:
-        expandEnvVars(rawAnthropic?.apiKey ?? "") ||
-        process.env.ANTHROPIC_API_KEY ||
-        DEFAULTS.upstream.anthropic.apiKey,
     },
     zai: {
       url: rawZai?.url ?? DEFAULTS.upstream.zai.url,

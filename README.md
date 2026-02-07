@@ -5,7 +5,7 @@ Claude Code proxy for routing requests between Anthropic API and z.ai GLM.
 ## Features
 
 - **Configurable model routing**: Route requests to different upstreams based on model name patterns with glob matching
-- **Model name rewriting**: Transparently rewrite model names (e.g., `claude-sonnet-*` → `glm-4-plus`)
+- **Model name rewriting**: Transparently rewrite model names (e.g., `claude-sonnet-*` → `GLM-4.7`)
 - **Thinking block transformation**: Convert z.ai thinking block format to Anthropic-compatible format
 - **Singleton proxy**: One proxy instance shared across multiple Claude Code sessions
 - **Lifecycle management**: Proxy starts/stops automatically with Claude Code
@@ -53,10 +53,11 @@ proxy:
   host: "127.0.0.1"
 
 upstream:
+  # Anthropic API (OAuth, forwards authorization header as-is)
   anthropic:
     url: "https://api.anthropic.com"
-    apiKey: ""  # Falls back to ANTHROPIC_API_KEY env var
 
+  # z.ai GLM API
   zai:
     url: "https://api.z.ai/api/anthropic"
     apiKey: ""  # Falls back to ZAI_API_KEY env var
@@ -74,11 +75,11 @@ routing:
   rules:
     - match: "claude-sonnet-*"
       upstream: zai
-      model: "glm-4-plus"
+      model: "GLM-4.7"
 
     - match: "claude-haiku-*"
       upstream: zai
-      model: "glm-4-flash"
+      model: "GLM-4.7"
 
     - match: "glm-*"
       upstream: zai
@@ -86,11 +87,10 @@ routing:
   default: anthropic
 ```
 
-Without a config file, all requests are routed to Anthropic API using the `ANTHROPIC_API_KEY` environment variable.
+Without a config file, all requests are routed to Anthropic API (OAuth).
 
 ### Environment Variables
 
-- `ANTHROPIC_API_KEY` — Anthropic API key (used when config `apiKey` is empty)
 - `ZAI_API_KEY` — z.ai API key (used when config `apiKey` is empty)
 - `ANTHROPIC_BASE_URL` — Automatically set by cc-glm to point to the proxy
 
@@ -100,8 +100,8 @@ Routing rules use glob patterns (`*` wildcard) and are evaluated top-to-bottom. 
 
 | Rule Pattern | Upstream | Model Sent |
 |---|---|---|
-| `claude-sonnet-*` | z.ai | `glm-4-plus` |
-| `claude-haiku-*` | z.ai | `glm-4-flash` |
+| `claude-sonnet-*` | z.ai | `GLM-4.7` |
+| `claude-haiku-*` | z.ai | `GLM-4.7` |
 | `glm-*` | z.ai | (original) |
 | (no match) | Anthropic | (original) |
 
@@ -112,7 +112,7 @@ Routing rules use glob patterns (`*` wildcard) and are evaluated top-to-bottom. 
 3. The proxy extracts the model name from each request body
 4. Routing rules determine the upstream (Anthropic or z.ai) and optional model rewrite
 5. Auth headers are adjusted per upstream:
-   - **Anthropic**: forwards the original `authorization` header
+   - **Anthropic**: forwards the original OAuth `authorization` header
    - **z.ai**: replaces `authorization` with `x-api-key`
 6. z.ai responses are transformed to ensure Anthropic-compatible thinking block format
 7. After Claude Code exits, the proxy waits a grace period (default 8s) and stops if no other sessions remain
