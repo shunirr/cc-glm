@@ -13,6 +13,7 @@ import type {
   UpstreamConfig,
   LifecycleConfig,
   LoggingConfig,
+  RoutingConfig,
   RawConfig,
 } from "./types.js";
 
@@ -39,6 +40,10 @@ const DEFAULTS = {
   },
   logging: {
     level: "info" as const,
+  },
+  routing: {
+    rules: [],
+    default: "anthropic",
   },
 } satisfies Config;
 
@@ -92,6 +97,7 @@ function mergeConfig(raw: RawConfig): Config {
     upstream: mergeUpstreamConfig(raw.upstream),
     lifecycle: mergeLifecycleConfig(raw.lifecycle),
     logging: mergeLoggingConfig(raw.logging),
+    routing: mergeRoutingConfig(raw.routing),
   };
 }
 
@@ -143,5 +149,12 @@ function mergeLifecycleConfig(raw?: Partial<LifecycleConfig>): LifecycleConfig {
 function mergeLoggingConfig(raw?: Partial<LoggingConfig>): LoggingConfig {
   return {
     level: raw?.level ?? DEFAULTS.logging.level,
+  };
+}
+
+function mergeRoutingConfig(raw?: Partial<RoutingConfig>): RoutingConfig {
+  return {
+    rules: raw?.rules ?? DEFAULTS.routing.rules,
+    default: raw?.default ?? DEFAULTS.routing.default,
   };
 }

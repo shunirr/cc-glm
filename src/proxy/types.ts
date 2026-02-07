@@ -7,9 +7,10 @@ import type { Config } from "../config/types.js";
 
 /** Upstream route target */
 export interface Route {
-  name: "anthropic" | "zai";
+  name: string;
   url: string;
   apiKey: string;
+  model?: string;
 }
 
 /** Request body with model field */

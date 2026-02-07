@@ -32,3 +32,24 @@ lifecycle:
 # Logging configuration
 logging:
   level: "info"  # debug, info, warn, error
+
+# Model routing configuration
+# Rules are evaluated top-to-bottom, first match wins
+routing:
+  rules:
+    # Route Claude Sonnet requests to z.ai with glm-4-plus
+    - match: "claude-sonnet-*"
+      upstream: zai
+      model: "glm-4-plus"
+
+    # Route Claude Haiku requests to z.ai with glm-4-flash
+    - match: "claude-haiku-*"
+      upstream: zai
+      model: "glm-4-flash"
+
+    # Route GLM models to z.ai (keep original model name)
+    - match: "glm-*"
+      upstream: zai
+
+  # Default upstream when no rule matches
+  default: anthropic

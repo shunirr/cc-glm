@@ -35,12 +35,26 @@ export interface LoggingConfig {
   level: "debug" | "info" | "warn" | "error";
 }
 
+/** Single routing rule */
+export interface RoutingRule {
+  match: string;
+  upstream: string;
+  model?: string;
+}
+
+/** Routing configuration */
+export interface RoutingConfig {
+  rules: RoutingRule[];
+  default: string;
+}
+
 /** Complete configuration structure */
 export interface Config {
   proxy: ProxyConfig;
   upstream: UpstreamConfig;
   lifecycle: LifecycleConfig;
   logging: LoggingConfig;
+  routing: RoutingConfig;
 }
 
 /** Raw parsed YAML structure (before environment variable expansion) */
@@ -49,4 +63,5 @@ export interface RawConfig {
   upstream?: Partial<UpstreamConfig>;
   lifecycle?: Partial<LifecycleConfig>;
   logging?: Partial<LoggingConfig>;
+  routing?: Partial<RoutingConfig>;
 }

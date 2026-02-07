@@ -1,27 +1,54 @@
 /**
  * Model-based routing logic
- * Routes glm-* models to z.ai, others to Anthropic API
+ * Routes requests to upstream based on config routing rules
  */
 
-import type { Config, Route } from "./types.js";
+import type { Config } from "../config/types.js";
+import type { Route } from "./types.js";
 
 /**
- * Select upstream route based on model name
- * @param model - Model name from request body
- * @param config - Configuration containing upstream URLs and API keys
- * @returns Selected route
+ * Convert a glob-style pattern to a RegExp
+ * Only supports `*` as wildcard (matches any characters)
+ */
+function globToRegExp(pattern: string): RegExp {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  const regexStr = "^" + escaped.replace(/\*/g, ".*") + "$";
+  return new RegExp(regexStr);
+}
+
+/**
+ * Select upstream route based on model name and config routing rules
+ * Rules are evaluated top-to-bottom, first match wins
  */
 export function selectRoute(model: string | undefined, config: Config): Route {
-  // GLM models route to z.ai
-  if (typeof model === "string" && model.startsWith("glm")) {
+  if (typeof model === "string") {
+    for (const rule of config.routing.rules) {
+      if (globToRegExp(rule.match).test(model)) {
+        const upstream = config.upstream[rule.upstream as keyof typeof config.upstream];
+        if (upstream) {
+          return {
+            name: rule.upstream,
+            url: upstream.url,
+            apiKey: upstream.apiKey,
+            model: rule.model,
+          };
+        }
+      }
+    }
+  }
+
+  // Fall back to default upstream
+  const defaultName = config.routing.default;
+  const defaultUpstream = config.upstream[defaultName as keyof typeof config.upstream];
+  if (defaultUpstream) {
     return {
-      name: "zai",
-      url: config.upstream.zai.url,
-      apiKey: config.upstream.zai.apiKey,
+      name: defaultName,
+      url: defaultUpstream.url,
+      apiKey: defaultUpstream.apiKey,
     };
   }
 
-  // Default to Anthropic
+  // Ultimate fallback to anthropic
   return {
     name: "anthropic",
     url: config.upstream.anthropic.url,

@@ -18,6 +18,7 @@ const mockConfig: Config = {
     stateDir: "/tmp/test-proxy",
   },
   logging: { level: "error" },
+  routing: { rules: [], default: "anthropic" },
 };
 
 describe("Proxy Server Integration", () => {

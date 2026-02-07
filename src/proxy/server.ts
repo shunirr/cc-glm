@@ -21,7 +21,10 @@ export function createProxyServer(config: Config): Server {
   server.listen(port, host, () => {
     console.log(`Claude Router Proxy on :${port}`);
     console.log(`  anthropic -> ${config.upstream.anthropic.url}`);
-    console.log(`  glm-*    -> ${config.upstream.zai.url}`);
+    console.log(`  zai       -> ${config.upstream.zai.url}`);
+    if (config.routing.rules.length > 0) {
+      console.log(`  routing rules: ${config.routing.rules.length}, default: ${config.routing.default}`);
+    }
   });
 
   return server;
@@ -52,6 +55,15 @@ async function handleRequest(
     }
     target = selectRoute(parsed?.model, config);
 
+    // Rewrite model name in request body if route specifies a different model
+    let forwardBody = body;
+    if (target.model && parsed) {
+      const bodyObj = JSON.parse(body.toString());
+      bodyObj.model = target.model;
+      forwardBody = Buffer.from(JSON.stringify(bodyObj));
+      console.log(`[${reqId}] model rewrite: ${model} -> ${target.model}`);
+    }
+
     // Build upstream URL
     const baseUrl = new URL(target.url);
     const basePath = baseUrl.pathname.replace(/\/$/, "");
@@ -70,7 +82,7 @@ async function handleRequest(
       }
     }
     forwardHeaders["accept-encoding"] = "identity";
-    forwardHeaders["content-length"] = Buffer.byteLength(body);
+    forwardHeaders["content-length"] = Buffer.byteLength(forwardBody);
 
     // Replace authorization for z.ai
     if (target.name === "zai") {
@@ -105,7 +117,7 @@ async function handleRequest(
       res.end(JSON.stringify({ error: "proxy_error", message: err.message }));
     });
 
-    proxyReq.write(body);
+    proxyReq.write(forwardBody);
     proxyReq.end();
   } catch (err) {
     const error = err as Error;
