@@ -10,7 +10,8 @@ import type { Config } from "../config/types.js";
 import type { Route } from "./types.js";
 import { selectRoute, parseRequestBody, parseRequestBodyAsObject } from "./router.js";
 import { loadConfig } from "../config/loader.js";
-import { transformThinkingBlocks, shouldTransformResponse, sanitizeContentBlocks, shouldTransformRequest } from "./transform.js";
+import { transformThinkingBlocks, shouldTransformResponse, sanitizeContentBlocks, shouldTransformRequest, extractAndRecordSignatures, sanitizeContentBlocksWithStore } from "./transform.js";
+import { SignatureStore } from "./signature-store.js";
 
 /**
  * Hop-by-hop headers that should not be forwarded per RFC 7230
@@ -57,8 +58,12 @@ const UPSTREAM_TIMEOUT_MS = 30_000;
 
 /** Create and start the proxy server */
 export function createProxyServer(config: Config): Server {
+  // Create signature store with configured max size
+  const signatureStore = new SignatureStore(config.signatureStore?.maxSize);
+  console.log(`Signature store initialized with max size: ${config.signatureStore?.maxSize ?? 1000}`);
+
   const server = createServer(async (req, res) => {
-    await handleRequest(req, res, config);
+    await handleRequest(req, res, config, signatureStore);
   });
 
   const { port, host } = config.proxy;
@@ -78,7 +83,8 @@ export function createProxyServer(config: Config): Server {
 async function handleRequest(
   req: IncomingMessage,
   res: ServerResponse,
-  config: Config
+  config: Config,
+  signatureStore: SignatureStore
 ): Promise<void> {
   const reqId = Date.now().toString(36);
   let requestBody: Buffer | null = null;
@@ -162,11 +168,12 @@ async function handleRequest(
 
     // Sanitize content blocks for Anthropic API
     // Removes z.ai specific fields from thinking blocks in message history
+    // Converts z.ai-origin thinking blocks to text blocks (unrecorded signatures)
     if (needsBody && forwardBody.length > 0) {
       const contentType = req.headers["content-type"];
       if (shouldTransformRequest(contentType, target.name)) {
         const originalBody = forwardBody.toString();
-        const sanitized = sanitizeContentBlocks(originalBody);
+        const sanitized = sanitizeContentBlocksWithStore(originalBody, signatureStore);
         if (sanitized !== originalBody) {
           forwardBody = Buffer.from(sanitized);
           bodyWasRewritten = true;
@@ -203,11 +210,13 @@ async function handleRequest(
         // Check if we need to transform the response
         const contentType = proxyRes.headers["content-type"];
         const needsTransform = shouldTransformResponse(contentType, target.name);
+        const isAnthropic = target.name === "anthropic";
+        const needsSignatureExtraction = isAnthropic && contentType?.includes("application/json");
 
         // Build response headers, removing hop-by-hop headers
         const resHeaders = buildResponseHeaders(proxyRes.headers, needsTransform);
 
-        if (needsTransform) {
+        if (needsTransform || needsSignatureExtraction) {
           // Buffer the response for transformation with size limit
           const chunks: Buffer[] = [];
           let totalSize = 0;
@@ -233,10 +242,21 @@ async function handleRequest(
             if (isAborted) return;
             try {
               const body = Buffer.concat(chunks).toString();
-              const transformed = transformThinkingBlocks(body);
-              resHeaders["content-length"] = String(Buffer.byteLength(transformed));
+              let processed = body;
+
+              // Extract signatures from Anthropic responses
+              if (isAnthropic) {
+                processed = extractAndRecordSignatures(body, signatureStore);
+              }
+
+              // Transform z.ai responses
+              if (needsTransform) {
+                processed = transformThinkingBlocks(processed);
+              }
+
+              resHeaders["content-length"] = String(Buffer.byteLength(processed));
               res.writeHead(proxyRes.statusCode || 200, resHeaders);
-              res.end(transformed);
+              res.end(processed);
             } catch (err) {
               const error = err as Error;
               console.error(`[${reqId}] Transform error: ${error.message}`);

@@ -59,6 +59,12 @@ export interface RoutingConfig {
   default: "anthropic" | "zai";
 }
 
+/** Signature store configuration */
+export interface SignatureStoreConfig {
+  /** Maximum number of signatures to store in LRU cache */
+  maxSize?: number;
+}
+
 /** Complete configuration structure */
 export interface Config {
   proxy: ProxyConfig;
@@ -66,6 +72,7 @@ export interface Config {
   lifecycle: LifecycleConfig;
   logging: LoggingConfig;
   routing: RoutingConfig;
+  signatureStore?: SignatureStoreConfig;
 }
 
 /** Raw parsed YAML structure (before environment variable expansion) */
@@ -75,4 +82,5 @@ export interface RawConfig {
   lifecycle?: Partial<LifecycleConfig>;
   logging?: Partial<LoggingConfig>;
   routing?: Partial<RoutingConfig>;
+  signature_store?: Partial<SignatureStoreConfig>;
 }

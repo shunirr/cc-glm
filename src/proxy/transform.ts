@@ -4,6 +4,7 @@
  */
 
 import type { ContentBlock, MessageRequestBody, Message } from "./types.js";
+import type { SignatureStore } from "./signature-store.js";
 
 /**
  * Fields to remove from thinking blocks when sending to Anthropic
@@ -145,15 +146,18 @@ function sanitizeThinkingBlock(block: ContentBlock): ContentBlock {
     }
   }
 
-  // Step 2: Copy all fields except z.ai specific ones and thinking field
+  // Step 2: Copy only safe fields (whitelist approach)
+  // Only copy fields that are safe for Anthropic API
+  const SAFE_THINKING_FIELDS = ["content", "cache_control"];
   for (const [key, value] of Object.entries(block)) {
-    if (!ZAI_THINKING_FIELDS.has(key) && key !== "thinking") {
+    if (SAFE_THINKING_FIELDS.includes(key)) {
       newBlock[key] = value;
     }
   }
 
-  // Step 3: Set content (prioritize existing content, but use extracted content if needed)
-  if (!newBlock.content && contentFromThinking !== null) {
+  // Step 3: Always use content from thinking field if available (overwrites existing content)
+  // This ensures we always use the latest thinking content, not cached old content
+  if (contentFromThinking !== null) {
     newBlock.content = contentFromThinking;
   }
 
@@ -180,6 +184,203 @@ export function shouldTransformRequest(
   if (upstream !== "anthropic") return false;
   if (!contentType) return false;
   return contentType.includes("application/json");
+}
+
+/**
+ * Extract and record signatures from Anthropic response
+ * Processes thinking blocks in the response and stores their signatures
+ * for later identification of Anthropic-generated content
+ *
+ * @param responseBody - The response body string from Anthropic
+ * @param store - The SignatureStore to record signatures in
+ * @returns The original response body (unchanged)
+ */
+export function extractAndRecordSignatures(
+  responseBody: string,
+  store: SignatureStore
+): string {
+  try {
+    const parsed = JSON.parse(responseBody) as AnthropicMessageResponse;
+
+    // Handle responses with content array
+    if (Array.isArray(parsed.content)) {
+      for (const block of parsed.content) {
+        if (block.type === "thinking" && block.signature) {
+          // Record the signature from Anthropic's thinking block
+          store.add(block.signature);
+        }
+      }
+    }
+
+    return responseBody;
+  } catch {
+    // Not JSON or parse error, return as-is
+    return responseBody;
+  }
+}
+
+/**
+ * Sanitize request body content blocks for Anthropic API with signature checking
+ * Converts thinking blocks with unrecorded signatures (z.ai origin) to text blocks
+ * Preserves thinking blocks with recorded signatures (Anthropic origin)
+ *
+ * @param requestBody - The request body string
+ * @param store - The SignatureStore to check signatures against
+ * @returns The sanitized request body string
+ */
+export function sanitizeContentBlocksWithStore(
+  requestBody: string,
+  store: SignatureStore
+): string {
+  try {
+    const parsed = JSON.parse(requestBody) as MessageRequestBody;
+
+    // Check if we have messages array to process
+    if (!parsed.messages || !Array.isArray(parsed.messages)) {
+      return requestBody;
+    }
+
+    let sanitized = false;
+
+    // Process each message
+    const newMessages = parsed.messages.map((msg) => {
+      const result = sanitizeMessageWithStore(msg, store);
+      if (result !== msg) {
+        sanitized = true;
+      }
+      return result;
+    });
+
+    if (sanitized) {
+      parsed.messages = newMessages;
+      return JSON.stringify(parsed);
+    }
+
+    return requestBody;
+  } catch {
+    // Not JSON or parse error, return as-is
+    return requestBody;
+  }
+}
+
+/**
+ * Sanitize a single message with signature checking
+ * Converts unrecorded thinking blocks to text blocks
+ */
+function sanitizeMessageWithStore(message: Message, store: SignatureStore): Message {
+  // If content is a string, no processing needed
+  if (typeof message.content === "string") {
+    return message;
+  }
+
+  // If content is not an array, return as-is
+  if (!Array.isArray(message.content)) {
+    return message;
+  }
+
+  // Create a shallow copy to detect changes
+  let wasModified = false;
+  const newContent: ContentBlock[] = [];
+
+  for (const block of message.content) {
+    const sanitized = sanitizeContentBlockWithStore(block, store);
+    if (sanitized !== block) {
+      wasModified = true;
+    }
+    newContent.push(sanitized);
+  }
+
+  if (wasModified) {
+    return { ...message, content: newContent };
+  }
+
+  return message;
+}
+
+/**
+ * Sanitize a single content block with signature checking
+ * Converts thinking blocks with unrecorded signatures to text blocks
+ */
+function sanitizeContentBlockWithStore(
+  block: ContentBlock,
+  store: SignatureStore
+): ContentBlock {
+  // Handle thinking blocks - check signature
+  if (block.type === "thinking") {
+    const signature = block.signature;
+
+    // Check if signature is recorded (Anthropic origin)
+    if (signature && store.has(signature)) {
+      // This is an Anthropic-generated thinking block, return as-is
+      // Don't modify anything - Anthropic needs to verify the signature
+      return block;
+    } else {
+      // This is a z.ai-origin thinking block, convert to text
+      return convertThinkingToText(block);
+    }
+  }
+
+  // Handle tool_result blocks which may contain nested content
+  if (block.type === "tool_result") {
+    const content = block.content;
+    if (Array.isArray(content)) {
+      let wasModified = false;
+      const newContent: ContentBlock[] = [];
+
+      for (const nestedBlock of content) {
+        const sanitized = sanitizeContentBlockWithStore(nestedBlock, store);
+        if (sanitized !== nestedBlock) {
+          wasModified = true;
+        }
+        newContent.push(sanitized);
+      }
+
+      if (wasModified) {
+        return { ...block, content: newContent };
+      }
+    }
+  }
+
+  return block;
+}
+
+/**
+ * Convert a thinking block to a text block
+ * Extracts the thinking content and wraps it in a text block with a prefix
+ */
+function convertThinkingToText(block: ContentBlock): ContentBlock {
+  // Extract thinking content
+  let thinkingText = "";
+
+  if (typeof block.thinking === "string") {
+    thinkingText = block.thinking;
+  } else if (typeof block.content === "string") {
+    thinkingText = block.content;
+  } else if (typeof block.thinking === "object" && block.thinking !== null) {
+    const thinkingObj = block.thinking as Record<string, unknown>;
+    if (typeof thinkingObj.content === "string") {
+      thinkingText = thinkingObj.content;
+    } else if (typeof thinkingObj.thinking === "string") {
+      thinkingText = thinkingObj.thinking;
+    } else if (typeof thinkingObj.text === "string") {
+      thinkingText = thinkingObj.text;
+    } else {
+      thinkingText = JSON.stringify(thinkingObj);
+    }
+  } else if (typeof block.content === "object" && block.content !== null) {
+    const contentObj = block.content as Record<string, unknown>;
+    if (typeof contentObj.text === "string") {
+      thinkingText = contentObj.text;
+    } else {
+      thinkingText = JSON.stringify(contentObj);
+    }
+  }
+
+  // Create text block with prefix
+  return {
+    type: "text",
+    text: `[Previous reasoning from GLM]\n${thinkingText}`,
+  };
 }
 
 interface AnthropicMessageResponse {

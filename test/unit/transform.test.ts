@@ -2,8 +2,9 @@
  * Unit tests for response transformation
  */
 
-import { describe, it, expect } from "vitest";
-import { transformThinkingBlocks, shouldTransformResponse, sanitizeContentBlocks, shouldTransformRequest } from "../../src/proxy/transform.js";
+import { describe, it, expect, beforeEach } from "vitest";
+import { transformThinkingBlocks, shouldTransformResponse, sanitizeContentBlocks, shouldTransformRequest, extractAndRecordSignatures, sanitizeContentBlocksWithStore } from "../../src/proxy/transform.js";
+import { SignatureStore } from "../../src/proxy/signature-store.js";
 
 describe("transformThinkingBlocks", () => {
   describe("Anthropic-compatible thinking block", () => {
@@ -406,9 +407,11 @@ describe("sanitizeContentBlocks", () => {
       const result = sanitizeContentBlocks(requestBody);
       const parsed = JSON.parse(result);
 
+      // New behavior: thinking field content always takes precedence over existing content
+      // This ensures we always use the latest thinking content, not cached old content
       expect(parsed.messages[0].content[0]).toEqual({
         type: "thinking",
-        content: "Existing content",
+        content: "Ignored thinking",
       });
       expect(parsed.messages[0].content[0].thinking).toBeUndefined();
     });
@@ -434,9 +437,10 @@ describe("sanitizeContentBlocks", () => {
       const parsed = JSON.parse(result);
 
       // thinking プロパティが確実に削除されていることを確認
+      // New behavior: thinking field content always takes precedence
       expect(parsed.messages[0].content[0]).toEqual({
         type: "thinking",
-        content: "some content",
+        content: "...",
       });
       expect(parsed.messages[0].content[0].thinking).toBeUndefined();
       expect(parsed.messages[0].content[0].signature).toBeUndefined();
@@ -523,6 +527,73 @@ describe("sanitizeContentBlocks", () => {
         type: "thinking",
         content: "Already valid content",
       });
+    });
+
+    it("ensures thinking property is removed even when content exists (extended format)", () => {
+      // This is the critical case: cached conversation with extended thinking block format
+      // Client has cached: { type: "thinking", content: "...", thinking: { thinking: "...", signature: "..." } }
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "thinking",
+                content: "cached content",
+                thinking: {
+                  thinking: "extended thinking content",
+                  signature: "cached-signature",
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocks(requestBody);
+      const parsed = JSON.parse(result);
+
+      // New behavior: thinking field content always takes precedence over cached content
+      // This ensures we always use the latest thinking content, not cached old content
+      expect(parsed.messages[0].content[0]).toEqual({
+        type: "thinking",
+        content: "extended thinking content",
+      });
+      expect(parsed.messages[0].content[0].thinking).toBeUndefined();
+      expect(parsed.messages[0].content[0].signature).toBeUndefined();
+    });
+
+    it("handles extended thinking block format without content field", () => {
+      // Extended format: { type: "thinking", thinking: { thinking: "...", signature: "..." } }
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "thinking",
+                thinking: {
+                  thinking: "deep thinking content",
+                  signature: "valid-signature-123",
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocks(requestBody);
+      const parsed = JSON.parse(result);
+
+      // Should extract thinking.thinking to content field
+      expect(parsed.messages[0].content[0]).toEqual({
+        type: "thinking",
+        content: "deep thinking content",
+      });
+      expect(parsed.messages[0].content[0].thinking).toBeUndefined();
+      expect(parsed.messages[0].content[0].signature).toBeUndefined();
     });
   });
 
@@ -760,5 +831,446 @@ describe("shouldTransformRequest", () => {
 
   it("returns true for JSON with charset", () => {
     expect(shouldTransformRequest("application/json; charset=utf-8", "anthropic")).toBe(true);
+  });
+});
+
+describe("extractAndRecordSignatures", () => {
+  let store: SignatureStore;
+
+  beforeEach(() => {
+    store = new SignatureStore(100);
+  });
+
+  describe("signature extraction", () => {
+    it("extracts and records signatures from thinking blocks", () => {
+      const response = JSON.stringify({
+        id: "msg_123",
+        type: "message",
+        role: "assistant",
+        content: [
+          { type: "thinking", content: "Let me think...", signature: "anthropic-sig-123" },
+          { type: "text", text: "Here is the answer." },
+        ],
+      });
+
+      const result = extractAndRecordSignatures(response, store);
+
+      // Response should be unchanged
+      expect(result).toBe(response);
+
+      // Signature should be recorded
+      expect(store.has("anthropic-sig-123")).toBe(true);
+    });
+
+    it("extracts multiple signatures from multiple thinking blocks", () => {
+      const response = JSON.stringify({
+        content: [
+          { type: "thinking", content: "Thinking 1", signature: "sig-1" },
+          { type: "text", text: "Text" },
+          { type: "thinking", content: "Thinking 2", signature: "sig-2" },
+        ],
+      });
+
+      extractAndRecordSignatures(response, store);
+
+      expect(store.has("sig-1")).toBe(true);
+      expect(store.has("sig-2")).toBe(true);
+    });
+
+    it("does not record signatures from thinking blocks without signature", () => {
+      const response = JSON.stringify({
+        content: [
+          { type: "thinking", content: "No signature" },
+        ],
+      });
+
+      extractAndRecordSignatures(response, store);
+
+      expect(store.size).toBe(0);
+    });
+
+    it("handles responses with string content", () => {
+      const response = JSON.stringify({
+        content: "Plain text response",
+      });
+
+      const result = extractAndRecordSignatures(response, store);
+
+      expect(result).toBe(response);
+      expect(store.size).toBe(0);
+    });
+
+    it("handles non-JSON responses", () => {
+      const response = "not a json response";
+
+      const result = extractAndRecordSignatures(response, store);
+
+      expect(result).toBe(response);
+      expect(store.size).toBe(0);
+    });
+
+    it("handles invalid JSON", () => {
+      const response = "{invalid json}";
+
+      const result = extractAndRecordSignatures(response, store);
+
+      expect(result).toBe(response);
+      expect(store.size).toBe(0);
+    });
+  });
+});
+
+describe("sanitizeContentBlocksWithStore", () => {
+  let store: SignatureStore;
+
+  beforeEach(() => {
+    store = new SignatureStore(100);
+  });
+
+  describe("z.ai-origin thinking blocks (unrecorded signatures)", () => {
+    it("converts thinking blocks with unrecorded signatures to text blocks", () => {
+      // Add an Anthropic signature to the store
+      store.add("anthropic-sig-123");
+
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "thinking",
+                content: "Thinking from z.ai",
+                signature: "zai-sig-456", // Not in store
+              },
+            ],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      const parsed = JSON.parse(result);
+
+      // Should be converted to text block
+      expect(parsed.messages[0].content[0].type).toBe("text");
+      expect(parsed.messages[0].content[0].text).toContain("[Previous reasoning from GLM]");
+      expect(parsed.messages[0].content[0].text).toContain("Thinking from z.ai");
+    });
+
+    it("converts thinking blocks without signature to text blocks", () => {
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "thinking",
+                thinking: "Thinking without signature",
+              },
+            ],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      const parsed = JSON.parse(result);
+
+      expect(parsed.messages[0].content[0].type).toBe("text");
+      expect(parsed.messages[0].content[0].text).toContain("[Previous reasoning from GLM]");
+      expect(parsed.messages[0].content[0].text).toContain("Thinking without signature");
+    });
+
+    it("extracts thinking content from nested object", () => {
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "thinking",
+                thinking: {
+                  thinking: "Nested thinking content",
+                  signature: "zai-sig",
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      const parsed = JSON.parse(result);
+
+      expect(parsed.messages[0].content[0].type).toBe("text");
+      expect(parsed.messages[0].content[0].text).toContain("Nested thinking content");
+    });
+  });
+
+  describe("Anthropic-origin thinking blocks (recorded signatures)", () => {
+    it("preserves thinking blocks with recorded signatures unchanged", () => {
+      // Record the signature as Anthropic-origin
+      store.add("anthropic-sig-123");
+
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "thinking",
+                content: "Anthropic thinking",
+                signature: "anthropic-sig-123",
+              },
+            ],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      const parsed = JSON.parse(result);
+
+      // Should remain as thinking block, completely unchanged
+      expect(parsed.messages[0].content[0].type).toBe("thinking");
+      expect(parsed.messages[0].content[0].content).toBe("Anthropic thinking");
+      // Signature MUST be preserved for Anthropic to verify
+      expect(parsed.messages[0].content[0].signature).toBe("anthropic-sig-123");
+    });
+
+    it("preserves thinking blocks with thinking field and recorded signature", () => {
+      store.add("anthropic-sig");
+
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "thinking",
+                thinking: "thinking content",
+                signature: "anthropic-sig",
+              },
+            ],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      const parsed = JSON.parse(result);
+
+      // Should be completely unchanged (Anthropic needs to verify signature)
+      expect(parsed.messages[0].content[0]).toEqual({
+        type: "thinking",
+        thinking: "thinking content",
+        signature: "anthropic-sig",
+      });
+    });
+  });
+
+  describe("mixed content scenarios", () => {
+    it("handles mix of Anthropic and z.ai thinking blocks", () => {
+      // Record only the Anthropic signature
+      store.add("anthropic-sig-1");
+
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "thinking",
+                content: "Anthropic thinking",
+                signature: "anthropic-sig-1",
+              },
+              {
+                type: "thinking",
+                content: "z.ai thinking",
+                signature: "zai-sig-2",
+              },
+              { type: "text", text: "Answer" },
+            ],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      const parsed = JSON.parse(result);
+
+      // First block should remain thinking (Anthropic) with signature
+      expect(parsed.messages[0].content[0].type).toBe("thinking");
+      expect(parsed.messages[0].content[0].signature).toBe("anthropic-sig-1");
+      // Second block should be converted to text (z.ai)
+      expect(parsed.messages[0].content[1].type).toBe("text");
+      expect(parsed.messages[0].content[1].text).toContain("[Previous reasoning from GLM]");
+      // Third block should remain text
+      expect(parsed.messages[0].content[2].type).toBe("text");
+      expect(parsed.messages[0].content[2].text).toBe("Answer");
+    });
+
+    it("handles multiple messages with different origins", () => {
+      store.add("anthropic-sig-1");
+
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "thinking",
+                content: "Anthropic thinking",
+                signature: "anthropic-sig-1",
+              },
+            ],
+          },
+          {
+            role: "user",
+            content: "Question",
+          },
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "thinking",
+                content: "z.ai thinking",
+                signature: "zai-sig-2",
+              },
+            ],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      const parsed = JSON.parse(result);
+
+      // First message: Anthropic thinking should be preserved with signature
+      expect(parsed.messages[0].content[0].type).toBe("thinking");
+      expect(parsed.messages[0].content[0].signature).toBe("anthropic-sig-1");
+      // Third message: z.ai thinking should be converted to text
+      expect(parsed.messages[2].content[0].type).toBe("text");
+      expect(parsed.messages[2].content[0].text).toContain("[Previous reasoning from GLM]");
+    });
+  });
+
+  describe("nested content in tool_result", () => {
+    it("handles thinking blocks within tool_result", () => {
+      store.add("anthropic-sig");
+
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "tool_1",
+                content: [
+                  {
+                    type: "thinking",
+                    content: "Nested Anthropic thinking",
+                    signature: "anthropic-sig",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      const parsed = JSON.parse(result);
+
+      const toolResult = parsed.messages[0].content[0];
+      expect(toolResult.type).toBe("tool_result");
+      // Anthropic thinking should be preserved with signature
+      expect(toolResult.content[0].type).toBe("thinking");
+      expect(toolResult.content[0].signature).toBe("anthropic-sig");
+    });
+
+    it("converts z.ai thinking blocks within tool_result to text", () => {
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "tool_1",
+                content: [
+                  {
+                    type: "thinking",
+                    content: "Nested z.ai thinking",
+                    signature: "zai-sig",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      const parsed = JSON.parse(result);
+
+      const toolResult = parsed.messages[0].content[0];
+      expect(toolResult.type).toBe("tool_result");
+      // z.ai thinking should be converted to text
+      expect(toolResult.content[0].type).toBe("text");
+      expect(toolResult.content[0].text).toContain("[Previous reasoning from GLM]");
+    });
+  });
+
+  describe("edge cases", () => {
+    it("returns original value if not JSON", () => {
+      const requestBody = "not a json request";
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      expect(result).toBe(requestBody);
+    });
+
+    it("returns original value if JSON is invalid", () => {
+      const requestBody = "{invalid json}";
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      expect(result).toBe(requestBody);
+    });
+
+    it("returns original value if messages array is missing", () => {
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        max_tokens: 4096,
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      expect(result).toBe(requestBody);
+    });
+
+    it("handles empty store", () => {
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "thinking",
+                content: "Some thinking",
+                signature: "any-sig",
+              },
+            ],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      const parsed = JSON.parse(result);
+
+      // All signatures should be treated as z.ai-origin
+      expect(parsed.messages[0].content[0].type).toBe("text");
+    });
   });
 });
