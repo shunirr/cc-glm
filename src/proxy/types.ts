@@ -20,3 +20,22 @@ export interface RequestBody {
 
 /** HTTP request handler */
 export type RequestHandler = (req: IncomingMessage, res: ServerResponse) => void;
+
+/**
+ * Content block types in Messages API
+ */
+export interface ContentBlock {
+  type: string;
+  [key: string]: unknown;
+}
+
+export interface Message {
+  role: string;
+  content: string | ContentBlock[];
+}
+
+export interface MessageRequestBody {
+  model?: string;
+  messages?: Message[];
+  [key: string]: unknown;
+}

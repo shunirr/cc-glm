@@ -10,7 +10,7 @@ import type { Config } from "../config/types.js";
 import type { Route } from "./types.js";
 import { selectRoute, parseRequestBody, parseRequestBodyAsObject } from "./router.js";
 import { loadConfig } from "../config/loader.js";
-import { transformThinkingBlocks, shouldTransformResponse } from "./transform.js";
+import { transformThinkingBlocks, shouldTransformResponse, sanitizeContentBlocks, shouldTransformRequest } from "./transform.js";
 
 /**
  * Hop-by-hop headers that should not be forwarded per RFC 7230
@@ -158,6 +158,21 @@ async function handleRequest(
       }
     } else {
       forwardBody = (needsBody && requestBody) || Buffer.alloc(0);
+    }
+
+    // Sanitize content blocks for Anthropic API
+    // Removes z.ai specific fields from thinking blocks in message history
+    if (needsBody && forwardBody.length > 0) {
+      const contentType = req.headers["content-type"];
+      if (shouldTransformRequest(contentType, target.name)) {
+        const originalBody = forwardBody.toString();
+        const sanitized = sanitizeContentBlocks(originalBody);
+        if (sanitized !== originalBody) {
+          forwardBody = Buffer.from(sanitized);
+          bodyWasRewritten = true;
+          console.log(`[${reqId}] sanitized request content blocks for Anthropic`);
+        }
+      }
     }
 
     // Build upstream URL (handle undefined req.url)

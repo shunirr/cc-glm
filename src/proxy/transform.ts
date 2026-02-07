@@ -3,12 +3,183 @@
  * Handles conversion between different API response formats
  */
 
+import type { ContentBlock, MessageRequestBody, Message } from "./types.js";
+
 /**
- * Anthropic API response content block types
+ * Fields to remove from thinking blocks when sending to Anthropic
  */
-interface ContentBlock {
-  type: string;
-  [key: string]: unknown;
+const ZAI_THINKING_FIELDS = new Set(["signature"]);
+
+/**
+ * Sanitize request body content blocks for Anthropic API
+ * Removes z.ai specific fields from thinking blocks in message history
+ */
+export function sanitizeContentBlocks(requestBody: string): string {
+  try {
+    const parsed = JSON.parse(requestBody) as MessageRequestBody;
+
+    // Check if we have messages array to process
+    if (!parsed.messages || !Array.isArray(parsed.messages)) {
+      return requestBody;
+    }
+
+    let sanitized = false;
+
+    // Process each message
+    const newMessages = parsed.messages.map((msg) => {
+      const result = sanitizeMessage(msg);
+      if (result !== msg) {
+        sanitized = true;
+      }
+      return result;
+    });
+
+    if (sanitized) {
+      parsed.messages = newMessages;
+      return JSON.stringify(parsed);
+    }
+
+    return requestBody;
+  } catch {
+    // Not JSON or parse error, return as-is
+    return requestBody;
+  }
+}
+
+/**
+ * Sanitize a single message by processing its content blocks
+ */
+function sanitizeMessage(message: Message): Message {
+  // If content is a string, no processing needed
+  if (typeof message.content === "string") {
+    return message;
+  }
+
+  // If content is not an array, return as-is
+  if (!Array.isArray(message.content)) {
+    return message;
+  }
+
+  // Create a shallow copy to detect changes
+  let wasModified = false;
+  const newContent: ContentBlock[] = [];
+
+  for (const block of message.content) {
+    const sanitized = sanitizeContentBlock(block);
+    if (sanitized !== block) {
+      wasModified = true;
+    }
+    newContent.push(sanitized);
+  }
+
+  if (wasModified) {
+    return { ...message, content: newContent };
+  }
+
+  return message;
+}
+
+/**
+ * Sanitize a single content block
+ */
+function sanitizeContentBlock(block: ContentBlock): ContentBlock {
+  // Handle thinking blocks - remove z.ai specific fields
+  if (block.type === "thinking") {
+    return sanitizeThinkingBlock(block);
+  }
+
+  // Handle tool_result blocks which may contain nested content
+  if (block.type === "tool_result") {
+    const content = block.content;
+    if (Array.isArray(content)) {
+      let wasModified = false;
+      const newContent: ContentBlock[] = [];
+
+      for (const nestedBlock of content) {
+        const sanitized = sanitizeContentBlock(nestedBlock);
+        if (sanitized !== nestedBlock) {
+          wasModified = true;
+        }
+        newContent.push(sanitized);
+      }
+
+      if (wasModified) {
+        return { ...block, content: newContent };
+      }
+    }
+  }
+
+  return block;
+}
+
+/**
+ * Sanitize a thinking block by removing z.ai specific fields
+ * Handles thinking field as string or object, converting to content field
+ * Anthropic API expects: { type: "thinking", content: "..." }
+ *
+ * Handles nested structures like:
+ * - { type: "thinking", thinking: "..." }
+ * - { type: "thinking", thinking: { text: "...", signature: "..." } }
+ * - { type: "thinking", thinking: { thinking: "...", signature: "..." } }
+ * - { type: "thinking", content: "...", thinking: { thinking: "...", signature: "..." } }
+ */
+function sanitizeThinkingBlock(block: ContentBlock): ContentBlock {
+  const newBlock: ContentBlock = { type: "thinking" };
+
+  // Step 1: Extract content from thinking field first (before copying other fields)
+  let contentFromThinking: string | null = null;
+
+  if (typeof block.thinking === "string") {
+    contentFromThinking = block.thinking;
+  } else if (typeof block.thinking === "object" && block.thinking !== null) {
+    const thinkingObj = block.thinking as Record<string, unknown>;
+    // Try multiple possible properties in order of preference
+    if (typeof thinkingObj.content === "string") {
+      contentFromThinking = thinkingObj.content;
+    } else if (typeof thinkingObj.thinking === "string") {
+      contentFromThinking = thinkingObj.thinking;
+    } else if (typeof thinkingObj.text === "string") {
+      contentFromThinking = thinkingObj.text;
+    } else {
+      contentFromThinking = JSON.stringify(thinkingObj);
+    }
+  }
+
+  // Step 2: Copy all fields except z.ai specific ones and thinking field
+  for (const [key, value] of Object.entries(block)) {
+    if (!ZAI_THINKING_FIELDS.has(key) && key !== "thinking") {
+      newBlock[key] = value;
+    }
+  }
+
+  // Step 3: Set content (prioritize existing content, but use extracted content if needed)
+  if (!newBlock.content && contentFromThinking !== null) {
+    newBlock.content = contentFromThinking;
+  }
+
+  // Step 4: Ensure content field exists (required by Anthropic API)
+  if (!newBlock.content) {
+    newBlock.content = "";
+  }
+
+  // Step 5: Remove invalid fields (ensure thinking and signature are always removed)
+  delete newBlock.signature;
+  delete newBlock.thinking;
+
+  return newBlock;
+}
+
+/**
+ * Check if a request should be transformed
+ * Only transform requests to Anthropic upstream
+ */
+export function shouldTransformRequest(
+  contentType: string | undefined,
+  upstream: string
+): boolean {
+  if (upstream !== "anthropic") return false;
+  if (!contentType) return false;
+  return contentType.includes("application/json");
 }
 
 interface AnthropicMessageResponse {
@@ -28,6 +199,11 @@ interface AnthropicMessageResponse {
 /**
  * Transform z.ai thinking blocks to Anthropic-compatible format
  * Handles invalid signature fields and format differences
+ *
+ * Handles various z.ai thinking block formats:
+ * - { type: "thinking", thinking: "..." }
+ * - { type: "thinking", thinking: { text: "...", signature: "..." } }
+ * - { type: "thinking", thinking: { thinking: "...", signature: "..." } }
  */
 export function transformThinkingBlocks(response: string): string {
   try {
@@ -43,11 +219,29 @@ export function transformThinkingBlocks(response: string): string {
           // Transform thinking block to Anthropic-compatible format
           const newBlock: ContentBlock = { type: "thinking" };
 
-          // Copy safe fields
-          if (typeof block.thinking === "string") {
-            newBlock.content = block.thinking;
-          } else if (typeof block.content === "string") {
+          // Copy safe fields - prioritize existing content field
+          if (typeof block.content === "string") {
             newBlock.content = block.content;
+          } else if (typeof block.thinking === "string") {
+            newBlock.content = block.thinking;
+          } else if (typeof block.thinking === "object" && block.thinking !== null) {
+            // thinking is an object - extract from nested properties
+            const thinkingObj = block.thinking as Record<string, unknown>;
+            // Try multiple possible properties in order of preference
+            if (typeof thinkingObj.content === "string") {
+              newBlock.content = thinkingObj.content;
+            } else if (typeof thinkingObj.thinking === "string") {
+              // Handle nested thinking.thinking structure
+              newBlock.content = thinkingObj.thinking;
+            } else if (typeof thinkingObj.text === "string") {
+              newBlock.content = thinkingObj.text;
+            } else {
+              // Stringify the object as fallback
+              newBlock.content = JSON.stringify(thinkingObj);
+            }
+          } else {
+            // No content found, use empty string
+            newBlock.content = "";
           }
 
           // Only include valid Anthropic fields
