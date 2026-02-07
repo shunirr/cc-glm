@@ -953,7 +953,7 @@ describe("sanitizeContentBlocksWithStore", () => {
 
       // Should be converted to text block
       expect(parsed.messages[0].content[0].type).toBe("text");
-      expect(parsed.messages[0].content[0].text).toContain("[Previous reasoning from GLM]");
+      expect(parsed.messages[0].content[0].text).toContain("<previous-glm-reasoning>");
       expect(parsed.messages[0].content[0].text).toContain("Thinking from z.ai");
     });
 
@@ -977,7 +977,7 @@ describe("sanitizeContentBlocksWithStore", () => {
       const parsed = JSON.parse(result);
 
       expect(parsed.messages[0].content[0].type).toBe("text");
-      expect(parsed.messages[0].content[0].text).toContain("[Previous reasoning from GLM]");
+      expect(parsed.messages[0].content[0].text).toContain("<previous-glm-reasoning>");
       expect(parsed.messages[0].content[0].text).toContain("Thinking without signature");
     });
 
@@ -1105,7 +1105,7 @@ describe("sanitizeContentBlocksWithStore", () => {
       expect(parsed.messages[0].content[0].signature).toBe("anthropic-sig-1");
       // Second block should be converted to text (z.ai)
       expect(parsed.messages[0].content[1].type).toBe("text");
-      expect(parsed.messages[0].content[1].text).toContain("[Previous reasoning from GLM]");
+      expect(parsed.messages[0].content[1].text).toContain("<previous-glm-reasoning>");
       // Third block should remain text
       expect(parsed.messages[0].content[2].type).toBe("text");
       expect(parsed.messages[0].content[2].text).toBe("Answer");
@@ -1152,7 +1152,7 @@ describe("sanitizeContentBlocksWithStore", () => {
       expect(parsed.messages[0].content[0].signature).toBe("anthropic-sig-1");
       // Third message: z.ai thinking should be converted to text
       expect(parsed.messages[2].content[0].type).toBe("text");
-      expect(parsed.messages[2].content[0].text).toContain("[Previous reasoning from GLM]");
+      expect(parsed.messages[2].content[0].text).toContain("<previous-glm-reasoning>");
     });
   });
 
@@ -1222,7 +1222,7 @@ describe("sanitizeContentBlocksWithStore", () => {
       expect(toolResult.type).toBe("tool_result");
       // z.ai thinking should be converted to text
       expect(toolResult.content[0].type).toBe("text");
-      expect(toolResult.content[0].text).toContain("[Previous reasoning from GLM]");
+      expect(toolResult.content[0].text).toContain("<previous-glm-reasoning>");
     });
   });
 

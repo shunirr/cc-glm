@@ -376,10 +376,10 @@ function convertThinkingToText(block: ContentBlock): ContentBlock {
     }
   }
 
-  // Create text block with prefix
+  // Create text block with XML tag wrapper
   return {
     type: "text",
-    text: `[Previous reasoning from GLM]\n${thinkingText}`,
+    text: `<previous-glm-reasoning>\n${thinkingText}\n</previous-glm-reasoning>`,
   };
 }
 
