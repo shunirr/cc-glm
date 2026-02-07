@@ -1,0 +1,34 @@
+# cc-glm Configuration Example
+# Copy this file to ~/.config/cc-glm/config.yml and customize
+
+# Proxy server configuration
+proxy:
+  port: 8787
+  host: "127.0.0.1"
+
+# Upstream API configuration
+upstream:
+  # Anthropic API (for non-GLM models)
+  anthropic:
+    url: "https://api.anthropic.com"
+    apiKey: ""  # Optional, defaults to ANTHROPIC_API_KEY env var
+
+  # z.ai GLM API (for glm-* models)
+  zai:
+    url: "https://api.z.ai/api/anthropic"
+    apiKey: ""  # Optional, defaults to ZAI_API_KEY env var
+
+# Lifecycle management
+lifecycle:
+  # Seconds to wait after Claude exits before stopping proxy
+  stopGraceSeconds: 8
+
+  # Maximum seconds to wait for proxy startup
+  startWaitSeconds: 8
+
+  # Directory for PID files and logs
+  stateDir: "${TMPDIR}/claude-code-proxy"
+
+# Logging configuration
+logging:
+  level: "info"  # debug, info, warn, error

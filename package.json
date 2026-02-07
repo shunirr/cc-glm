@@ -1,0 +1,44 @@
+{
+  "name": "cc-glm",
+  "version": "1.0.0",
+  "description": "Claude Code proxy for switching between Anthropic API and z.ai GLM",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "cc-glm": "./dist/bin/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "proxy",
+    "anthropic",
+    "glm",
+    "z-ai"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "yaml": "^2.5.0",
+    "chalk": "^5.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.0",
+    "tsup": "^8.0.0",
+    "vitest": "^1.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
