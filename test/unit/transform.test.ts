@@ -917,6 +917,20 @@ describe("extractAndRecordSignatures", () => {
       expect(result).toBe(response);
       expect(store.size).toBe(0);
     });
+
+    it("ignores non-string signatures in thinking blocks", () => {
+      const response = JSON.stringify({
+        content: [
+          { type: "thinking", content: "Thinking", signature: 12345 },
+          { type: "thinking", content: "Thinking 2", signature: null },
+          { type: "thinking", content: "Thinking 3", signature: { nested: true } },
+        ],
+      });
+
+      extractAndRecordSignatures(response, store);
+
+      expect(store.size).toBe(0);
+    });
   });
 });
 

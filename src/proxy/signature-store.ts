@@ -1,36 +1,34 @@
 /**
  * Signature Store for tracking Anthropic thinking block signatures
- * Uses LRU (Least Recently Used) cache with a maximum size
+ * Uses Map insertion order for O(1) LRU eviction
  */
 
 /** Default maximum number of signatures to store */
 const DEFAULT_MAX_SIZE = 1000;
 
 /**
- * LRU Cache entry containing signature and timestamp
- */
-interface CacheEntry {
-  signature: string;
-  timestamp: number;
-}
-
-/**
- * Signature Store using LRU cache
+ * Signature Store using Map-based LRU cache
  * Tracks signatures from Anthropic thinking blocks to distinguish them from z.ai blocks
+ *
+ * Uses Map's insertion order guarantee: iterating a Map yields entries in insertion order.
+ * By deleting and re-setting an entry on access, the entry moves to the end (most recent).
+ * The first entry in iteration order is always the least recently used.
  */
 export class SignatureStore {
-  private cache: Map<string, CacheEntry>;
+  private cache: Map<string, true>;
   private maxSize: number;
-  private accessOrder: string[];
 
   /**
    * Create a new SignatureStore
-   * @param maxSize - Maximum number of signatures to store (default: 1000)
+   * @param maxSize - Maximum number of signatures to store (default: 1000, min: 1)
    */
   constructor(maxSize: number = DEFAULT_MAX_SIZE) {
-    this.maxSize = maxSize;
+    if (!Number.isInteger(maxSize) || maxSize < 1) {
+      this.maxSize = DEFAULT_MAX_SIZE;
+    } else {
+      this.maxSize = maxSize;
+    }
     this.cache = new Map();
-    this.accessOrder = [];
   }
 
   /**
@@ -39,32 +37,22 @@ export class SignatureStore {
    * @param signature - The signature string to store
    */
   add(signature: string): void {
-    if (!signature) {
+    if (typeof signature !== "string" || signature === "") {
       return;
     }
 
-    // Update existing entry or create new one
+    // Delete first to update insertion order (move to end)
     if (this.cache.has(signature)) {
-      // Update timestamp and move to end of access order
-      const entry = this.cache.get(signature)!;
-      entry.timestamp = Date.now();
-      this.moveToEnd(signature);
-    } else {
-      // Add new entry
-      if (this.cache.size >= this.maxSize) {
-        // Remove least recently used entry (first in accessOrder)
-        const lruSignature = this.accessOrder.shift();
-        if (lruSignature) {
-          this.cache.delete(lruSignature);
-        }
+      this.cache.delete(signature);
+    } else if (this.cache.size >= this.maxSize) {
+      // Remove least recently used entry (first in Map iteration order)
+      const lruKey = this.cache.keys().next().value;
+      if (lruKey !== undefined) {
+        this.cache.delete(lruKey);
       }
-
-      this.cache.set(signature, {
-        signature,
-        timestamp: Date.now(),
-      });
-      this.accessOrder.push(signature);
     }
+
+    this.cache.set(signature, true);
   }
 
   /**
@@ -74,16 +62,17 @@ export class SignatureStore {
    * @returns true if the signature is in the store
    */
   has(signature: string): boolean {
-    if (!signature) {
+    if (typeof signature !== "string" || signature === "") {
       return false;
     }
 
-    const exists = this.cache.has(signature);
-    if (exists) {
-      // Update access order (mark as recently used)
-      this.moveToEnd(signature);
+    if (this.cache.has(signature)) {
+      // Move to end of Map (most recently used)
+      this.cache.delete(signature);
+      this.cache.set(signature, true);
+      return true;
     }
-    return exists;
+    return false;
   }
 
   /**
@@ -99,19 +88,6 @@ export class SignatureStore {
    */
   clear(): void {
     this.cache.clear();
-    this.accessOrder = [];
-  }
-
-  /**
-   * Move a signature to the end of the access order (most recently used)
-   * @param signature - The signature to move
-   */
-  private moveToEnd(signature: string): void {
-    const index = this.accessOrder.indexOf(signature);
-    if (index !== -1) {
-      this.accessOrder.splice(index, 1);
-      this.accessOrder.push(signature);
-    }
   }
 
   /**

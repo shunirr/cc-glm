@@ -14,6 +14,7 @@ import type {
   LifecycleConfig,
   LoggingConfig,
   RoutingConfig,
+  SignatureStoreConfig,
   RawConfig,
 } from "./types.js";
 
@@ -98,12 +99,13 @@ export async function loadConfig(filePath: string = getDefaultConfigPath()): Pro
  * Merge raw config with defaults, validate, and apply environment variable expansion
  */
 function mergeAndValidateConfig(raw: RawConfig): Config {
-  const config = {
+  const config: Config = {
     proxy: mergeProxyConfig(raw.proxy),
     upstream: mergeUpstreamConfig(raw.upstream),
     lifecycle: mergeLifecycleConfig(raw.lifecycle),
     logging: mergeLoggingConfig(raw.logging),
     routing: mergeRoutingConfig(raw.routing),
+    signatureStore: mergeSignatureStoreConfig(raw.signature_store),
   };
 
   // Validate configuration
@@ -272,6 +274,27 @@ function mergeRoutingConfig(raw?: Partial<RoutingConfig>): RoutingConfig {
     rules,
     default: defaultUpstream,
   };
+}
+
+function mergeSignatureStoreConfig(raw?: Partial<SignatureStoreConfig>): SignatureStoreConfig {
+  const DEFAULT_MAX_SIZE = 1000;
+  const rawMaxSize = raw?.maxSize;
+
+  let maxSize: number;
+  if (typeof rawMaxSize === "number" && Number.isFinite(rawMaxSize) && !isNaN(rawMaxSize)) {
+    maxSize = rawMaxSize;
+  } else {
+    maxSize = DEFAULT_MAX_SIZE;
+  }
+
+  if (!Number.isInteger(maxSize)) {
+    throw new Error(`Invalid signatureStore.maxSize: ${maxSize}. Must be an integer.`);
+  }
+  if (maxSize < 1 || maxSize > 100000) {
+    throw new Error(`Invalid signatureStore.maxSize: ${maxSize}. Must be between 1 and 100000.`);
+  }
+
+  return { maxSize };
 }
 
 /**

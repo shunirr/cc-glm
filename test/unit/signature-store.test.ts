@@ -29,6 +29,25 @@ describe("SignatureStore", () => {
       expect(store.has(undefined as unknown as string)).toBe(false);
     });
 
+    it("ignores non-string signatures on add", () => {
+      const store = new SignatureStore(10);
+
+      store.add(123 as unknown as string);
+      store.add(null as unknown as string);
+      store.add(undefined as unknown as string);
+      store.add({} as unknown as string);
+
+      expect(store.size).toBe(0);
+    });
+
+    it("returns false for non-string signatures on has", () => {
+      const store = new SignatureStore(10);
+
+      expect(store.has(123 as unknown as string)).toBe(false);
+      expect(store.has(null as unknown as string)).toBe(false);
+      expect(store.has({} as unknown as string)).toBe(false);
+    });
+
     it("returns the correct size", () => {
       const store = new SignatureStore(10);
 
@@ -142,7 +161,7 @@ describe("SignatureStore", () => {
     });
   });
 
-  describe("default max size", () => {
+  describe("constructor validation", () => {
     it("uses default max size of 1000 when not specified", () => {
       const store = new SignatureStore();
 
@@ -157,6 +176,45 @@ describe("SignatureStore", () => {
       store.add("sig-1000");
       expect(store.size).toBe(1000);
       expect(store.has("sig-0")).toBe(false);
+    });
+
+    it("falls back to default for maxSize of 0", () => {
+      const store = new SignatureStore(0);
+
+      for (let i = 0; i < 1001; i++) {
+        store.add(`sig-${i}`);
+      }
+
+      // Should use default (1000), not 0
+      expect(store.size).toBe(1000);
+    });
+
+    it("falls back to default for negative maxSize", () => {
+      const store = new SignatureStore(-5);
+
+      store.add("sig-1");
+      store.add("sig-2");
+
+      // Should use default, so both should be stored
+      expect(store.size).toBe(2);
+      expect(store.has("sig-1")).toBe(true);
+    });
+
+    it("falls back to default for non-integer maxSize", () => {
+      const store = new SignatureStore(3.5);
+
+      store.add("sig-1");
+      store.add("sig-2");
+
+      // Should use default, so both should be stored
+      expect(store.size).toBe(2);
+    });
+
+    it("falls back to default for NaN maxSize", () => {
+      const store = new SignatureStore(NaN);
+
+      store.add("sig-1");
+      expect(store.size).toBe(1);
     });
   });
 
@@ -197,24 +255,6 @@ describe("SignatureStore", () => {
 
       expect(store.has("sig-2")).toBe(false);
       expect(store.has("")).toBe(false);
-    });
-  });
-
-  describe("timestamp tracking", () => {
-    it("tracks timestamps internally", () => {
-      const store = new SignatureStore(10);
-
-      store.add("sig-1");
-
-      // Wait a bit and add another signature
-      const startTime = Date.now();
-      store.add("sig-2");
-      const endTime = Date.now();
-
-      // We can't directly access timestamps, but we can verify
-      // that the store still works correctly
-      expect(store.has("sig-1")).toBe(true);
-      expect(store.has("sig-2")).toBe(true);
     });
   });
 });

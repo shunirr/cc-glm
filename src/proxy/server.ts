@@ -10,7 +10,7 @@ import type { Config } from "../config/types.js";
 import type { Route } from "./types.js";
 import { selectRoute, parseRequestBody, parseRequestBodyAsObject } from "./router.js";
 import { loadConfig } from "../config/loader.js";
-import { transformThinkingBlocks, shouldTransformResponse, sanitizeContentBlocks, shouldTransformRequest, extractAndRecordSignatures, sanitizeContentBlocksWithStore } from "./transform.js";
+import { transformThinkingBlocks, shouldTransformResponse, shouldTransformRequest, extractAndRecordSignatures, sanitizeContentBlocksWithStore } from "./transform.js";
 import { SignatureStore } from "./signature-store.js";
 
 /**
@@ -59,8 +59,9 @@ const UPSTREAM_TIMEOUT_MS = 30_000;
 /** Create and start the proxy server */
 export function createProxyServer(config: Config): Server {
   // Create signature store with configured max size
-  const signatureStore = new SignatureStore(config.signatureStore?.maxSize);
-  console.log(`Signature store initialized with max size: ${config.signatureStore?.maxSize ?? 1000}`);
+  const maxSize = config.signatureStore?.maxSize;
+  const signatureStore = new SignatureStore(maxSize);
+  console.log(`Signature store initialized with max size: ${maxSize ?? 1000}`);
 
   const server = createServer(async (req, res) => {
     await handleRequest(req, res, config, signatureStore);
@@ -214,7 +215,9 @@ async function handleRequest(
         const needsSignatureExtraction = isAnthropic && contentType?.includes("application/json");
 
         // Build response headers, removing hop-by-hop headers
-        const resHeaders = buildResponseHeaders(proxyRes.headers, needsTransform);
+        // When buffering response (for transform or signature extraction), remove transfer-encoding
+        const needsBuffering = needsTransform || needsSignatureExtraction;
+        const resHeaders = buildResponseHeaders(proxyRes.headers, needsBuffering);
 
         if (needsTransform || needsSignatureExtraction) {
           // Buffer the response for transformation with size limit

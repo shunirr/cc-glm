@@ -7,11 +7,6 @@ import type { ContentBlock, MessageRequestBody, Message } from "./types.js";
 import type { SignatureStore } from "./signature-store.js";
 
 /**
- * Fields to remove from thinking blocks when sending to Anthropic
- */
-const ZAI_THINKING_FIELDS = new Set(["signature"]);
-
-/**
  * Sanitize request body content blocks for Anthropic API
  * Removes z.ai specific fields from thinking blocks in message history
  */
@@ -205,7 +200,7 @@ export function extractAndRecordSignatures(
     // Handle responses with content array
     if (Array.isArray(parsed.content)) {
       for (const block of parsed.content) {
-        if (block.type === "thinking" && block.signature) {
+        if (block.type === "thinking" && typeof block.signature === "string" && block.signature) {
           // Record the signature from Anthropic's thinking block
           store.add(block.signature);
         }
@@ -310,7 +305,7 @@ function sanitizeContentBlockWithStore(
     const signature = block.signature;
 
     // Check if signature is recorded (Anthropic origin)
-    if (signature && store.has(signature)) {
+    if (typeof signature === "string" && signature && store.has(signature)) {
       // This is an Anthropic-generated thinking block, return as-is
       // Don't modify anything - Anthropic needs to verify the signature
       return block;
