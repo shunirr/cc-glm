@@ -14,13 +14,13 @@ Claude Code proxy for routing requests between Anthropic API and z.ai GLM.
 ## Installation
 
 ```bash
-npm install -g cc-glm
+npm install -g @shunirr/cc-glm
 ```
 
 Or use with npx:
 
 ```bash
-npx cc-glm
+npx @shunirr/cc-glm
 ```
 
 ## Usage
