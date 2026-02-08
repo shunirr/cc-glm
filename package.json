@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
-    "cc-glm": "./dist/bin/cli.js"
+    "cc-glm": "dist/bin/cli.js"
   },
   "files": [
     "dist",
