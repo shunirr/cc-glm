@@ -216,7 +216,7 @@ async function handleRequest(
 
         // Build response headers, removing hop-by-hop headers
         // When buffering response (for transform or signature extraction), remove transfer-encoding
-        const needsBuffering = needsTransform || needsSignatureExtraction;
+        const needsBuffering = needsTransform || !!needsSignatureExtraction;
         const resHeaders = buildResponseHeaders(proxyRes.headers, needsBuffering);
 
         if (needsTransform || needsSignatureExtraction) {

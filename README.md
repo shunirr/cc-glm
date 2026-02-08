@@ -48,6 +48,10 @@ The proxy automatically:
 Create `~/.config/cc-glm/config.yml`:
 
 ```yaml
+# Claude Code CLI command path (empty = auto-detect from PATH)
+claude:
+  path: ""
+
 proxy:
   port: 8787
   host: "127.0.0.1"
@@ -85,6 +89,18 @@ routing:
       upstream: zai
 
   default: anthropic
+```
+
+### Configuration Options
+
+#### `claude.path`
+Path to the Claude Code CLI executable. If empty or not specified, `cc-glm` will auto-detect the command from your PATH using `which` (Unix/macOS) or `where` (Windows).
+
+```yaml
+claude:
+  path: "/usr/local/bin/claude"  # Custom path
+  # or
+  path: ""  # Auto-detect (default)
 ```
 
 Without a config file, all requests are routed to Anthropic API (OAuth).

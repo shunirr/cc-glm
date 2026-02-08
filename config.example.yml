@@ -1,6 +1,11 @@
 # cc-glm Configuration Example
 # Copy this file to ~/.config/cc-glm/config.yml and customize
 
+# Claude Code CLI command configuration
+claude:
+  # Path to claude executable (empty = auto-detect from PATH)
+  path: ""
+
 # Proxy server configuration
 proxy:
   port: 8787

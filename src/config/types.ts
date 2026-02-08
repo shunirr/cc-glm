@@ -59,6 +59,11 @@ export interface RoutingConfig {
   default: "anthropic" | "zai";
 }
 
+/** Claude command configuration */
+export interface ClaudeConfig {
+  path: string;
+}
+
 /** Signature store configuration */
 export interface SignatureStoreConfig {
   /** Maximum number of signatures to store in LRU cache */
@@ -73,6 +78,7 @@ export interface Config {
   logging: LoggingConfig;
   routing: RoutingConfig;
   signatureStore?: SignatureStoreConfig;
+  claude: ClaudeConfig;
 }
 
 /** Raw parsed YAML structure (before environment variable expansion) */
@@ -83,4 +89,5 @@ export interface RawConfig {
   logging?: Partial<LoggingConfig>;
   routing?: Partial<RoutingConfig>;
   signature_store?: Partial<SignatureStoreConfig>;
+  claude?: Partial<ClaudeConfig>;
 }

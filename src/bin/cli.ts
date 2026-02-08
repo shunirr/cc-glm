@@ -9,12 +9,24 @@ import { loadConfig } from "../config/loader.js";
 import { SingletonProxy } from "../lifecycle/singleton.js";
 import { hasClaudeProcess } from "../lifecycle/tracker.js";
 import { Logger } from "../utils/logger.js";
+import { resolveClaudePath } from "../utils/claude.js";
 
 /** Main CLI function */
 async function main(): Promise<void> {
   // Load configuration
   const config = await loadConfig();
   const logger = new Logger(config.logging);
+
+  // Resolve claude command path
+  let claudePath: string;
+  try {
+    claudePath = await resolveClaudePath(config.claude.path);
+    logger.debug(`Using claude: ${claudePath}`);
+  } catch (err) {
+    logger.error(`Failed to locate claude: ${err}`);
+    process.exit(1);
+    return;
+  }
 
   // Initialize singleton proxy manager
   const proxy = new SingletonProxy(config);
@@ -33,7 +45,7 @@ async function main(): Promise<void> {
   logger.info(`Starting claude with args: ${args.join(" ") || "(no args)"}`);
 
   // Spawn claude process
-  const claude = spawn("claude", args, {
+  const claude = spawn(claudePath, args, {
     stdio: "inherit",
     env: { ...process.env, ANTHROPIC_BASE_URL: baseUrl },
   });

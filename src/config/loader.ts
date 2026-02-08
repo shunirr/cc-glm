@@ -15,6 +15,7 @@ import type {
   LoggingConfig,
   RoutingConfig,
   SignatureStoreConfig,
+  ClaudeConfig,
   RawConfig,
 } from "./types.js";
 
@@ -51,6 +52,7 @@ const DEFAULTS: Config = {
     rules: [],
     default: "anthropic",
   },
+  claude: { path: "" },
 };
 
 /**
@@ -106,6 +108,7 @@ function mergeAndValidateConfig(raw: RawConfig): Config {
     logging: mergeLoggingConfig(raw.logging),
     routing: mergeRoutingConfig(raw.routing),
     signatureStore: mergeSignatureStoreConfig(raw.signature_store),
+    claude: mergeClaudeConfig(raw.claude),
   };
 
   // Validate configuration
@@ -295,6 +298,14 @@ function mergeSignatureStoreConfig(raw?: Partial<SignatureStoreConfig>): Signatu
   }
 
   return { maxSize };
+}
+
+function mergeClaudeConfig(raw?: Partial<ClaudeConfig>): ClaudeConfig {
+  const path = raw?.path ?? DEFAULTS.claude.path;
+  if (typeof path !== "string") {
+    throw new Error(`Invalid claude.path: must be a string`);
+  }
+  return { path };
 }
 
 /**
