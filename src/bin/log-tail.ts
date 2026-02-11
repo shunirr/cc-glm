@@ -33,7 +33,7 @@ function colorLevel(level: string): string {
 
 /** Format a LogEntry for display */
 function formatEntry(entry: LogEntry): string {
-  const ts = chalk.dim.white(entry.ts);
+  const ts = chalk.dim.white(new Date(entry.ts).toLocaleTimeString("en-GB", { hour12: false }));
   const level = colorLevel(entry.level);
   const component = entry.component ? chalk.blue(`[${entry.component}]`) : "";
   const reqId = entry.reqId ? chalk.magenta(`[${entry.reqId}]`) : "";
