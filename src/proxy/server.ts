@@ -6,6 +6,7 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { request as httpRequest } from "node:http";
+import { join } from "node:path";
 import type { Config } from "../config/types.js";
 import type { Route } from "./types.js";
 import { selectRoute, parseRequestBody, parseRequestBodyAsObject } from "./router.js";
@@ -536,7 +537,8 @@ export async function startProxy(config: Config, logger: Logger): Promise<Server
 if (import.meta.url === `file://${process.argv[1]}`) {
   loadConfig()
     .then(({ config }) => {
-      const logger = new Logger(config.logging);
+      const logFilePath = config.logging.file ?? join(config.lifecycle.stateDir, "cc-glm.jsonl");
+      const logger = new Logger(config.logging, { logFilePath, stderr: false });
       createProxyServer(config, logger);
     })
     .catch((err) => {

@@ -19,7 +19,7 @@ const LOG_LEVEL_VALUES: Record<string, number> = {
 function colorLevel(level: string): string {
   switch (level) {
     case "debug":
-      return chalk.gray(level.toUpperCase().padEnd(5));
+      return chalk.dim.white(level.toUpperCase().padEnd(5));
     case "info":
       return chalk.cyan(level.toUpperCase().padEnd(5));
     case "warn":
@@ -33,7 +33,7 @@ function colorLevel(level: string): string {
 
 /** Format a LogEntry for display */
 function formatEntry(entry: LogEntry): string {
-  const ts = chalk.gray(entry.ts);
+  const ts = chalk.dim.white(entry.ts);
   const level = colorLevel(entry.level);
   const component = entry.component ? chalk.blue(`[${entry.component}]`) : "";
   const reqId = entry.reqId ? chalk.magenta(`[${entry.reqId}]`) : "";
@@ -45,9 +45,9 @@ function formatEntry(entry: LogEntry): string {
   for (const [key, value] of Object.entries(entry)) {
     if (skipKeys.has(key) || value === undefined || value === null) continue;
     if (key === "bodyExcerpt") {
-      extras.push(`${chalk.gray(key)}=${chalk.dim(String(value).slice(0, 200))}`);
+      extras.push(`${chalk.dim.white(key)}=${chalk.dim(String(value).slice(0, 200))}`);
     } else {
-      extras.push(`${chalk.gray(key)}=${String(value)}`);
+      extras.push(`${chalk.dim.white(key)}=${String(value)}`);
     }
   }
 
