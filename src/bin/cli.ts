@@ -5,6 +5,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { loadConfig } from "../config/loader.js";
 import { SingletonProxy } from "../lifecycle/singleton.js";
@@ -13,13 +14,63 @@ import { Logger } from "../utils/logger.js";
 import { resolveClaudePath } from "../utils/claude.js";
 import { tailLogs } from "./log-tail.js";
 
+const require = createRequire(import.meta.url);
+const { version } = require("../../package.json") as { version: string };
+
+const HELP_TEXT = `cc-glm - Claude Code proxy for Anthropic API / z.ai GLM routing
+
+Usage:
+  cc-glm [options]
+  cc-glm [options] -- [claude-args...]
+  cc-glm logs [--level=LEVEL] [--no-follow]
+
+Options:
+  -h, --help       Show this help message
+  -v, --version    Show version
+
+Claude Arguments:
+  Use -- to pass arguments to the claude command.
+  Example: cc-glm -- --help
+`;
+
+function printHelp(): void {
+  process.stdout.write(HELP_TEXT);
+}
+
+function printVersion(): void {
+  process.stdout.write(`${version}\n`);
+}
+
 /** Main CLI function */
 async function main(): Promise<void> {
+  const rawArgs = process.argv.slice(2);
+
   // Check for logs subcommand before loading config
-  const args = process.argv.slice(2);
-  if (args[0] === "logs") {
-    await handleLogsCommand(args.slice(1));
+  if (rawArgs[0] === "logs") {
+    await handleLogsCommand(rawArgs.slice(1));
     return;
+  }
+
+  // Split args at "--" separator
+  const separatorIndex = rawArgs.indexOf("--");
+  const ccGlmArgs = separatorIndex >= 0 ? rawArgs.slice(0, separatorIndex) : rawArgs;
+  const claudeArgs = separatorIndex >= 0 ? rawArgs.slice(separatorIndex + 1) : [];
+
+  // Handle cc-glm own flags
+  if (ccGlmArgs.includes("--help") || ccGlmArgs.includes("-h")) {
+    printHelp();
+    process.exit(0);
+  }
+  if (ccGlmArgs.includes("--version") || ccGlmArgs.includes("-v")) {
+    printVersion();
+    process.exit(0);
+  }
+
+  // Reject unknown flags
+  if (ccGlmArgs.length > 0) {
+    process.stderr.write(`Unknown option: ${ccGlmArgs[0]}\n\n`);
+    printHelp();
+    process.exit(1);
   }
 
   // Load configuration
@@ -57,11 +108,11 @@ async function main(): Promise<void> {
   const baseUrl = proxy.getBaseUrl();
   process.env.ANTHROPIC_BASE_URL = baseUrl;
 
-  // Forward all arguments to claude command
-  logger.info(`Starting claude with args: ${args.join(" ") || "(no args)"}`, { component: "cli" });
+  // Forward claude arguments
+  logger.info(`Starting claude with args: ${claudeArgs.join(" ") || "(no args)"}`, { component: "cli" });
 
   // Spawn claude process
-  const claude = spawn(claudePath, args, {
+  const claude = spawn(claudePath, claudeArgs, {
     stdio: "inherit",
     env: { ...process.env, ANTHROPIC_BASE_URL: baseUrl },
   });
