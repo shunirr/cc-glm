@@ -19,6 +19,7 @@ import {
   sleep,
   execCommand,
 } from "../utils/process.js";
+import { Logger, ChildLogger } from "../utils/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -29,13 +30,15 @@ export class SingletonProxy {
   private pidFile: string;
   private lockDir: string;
   private logFile: string;
+  private log: ChildLogger;
 
-  constructor(config: Config) {
+  constructor(config: Config, logger: Logger) {
     this.config = config;
     const stateDir = config.lifecycle.stateDir;
     this.pidFile = join(stateDir, "proxy.pid");
     this.lockDir = join(stateDir, "lock");
     this.logFile = join(stateDir, "proxy.log");
+    this.log = logger.child({ component: "lifecycle" });
   }
 
   /**
@@ -55,7 +58,7 @@ export class SingletonProxy {
       const pid = readPidFile(this.pidFile);
       if (pid && pid > 0 && pidIsAlive(pid) && (await this.verifyPidOwnsPort(pid))) {
         // Port is listening, PID is alive, and PID owns the port - it's our proxy
-        console.log(`Proxy already running on port ${this.config.proxy.port} (PID ${pid})`);
+        this.log.info(`Proxy already running on port ${this.config.proxy.port} (PID ${pid})`);
         return;
       } else {
         // Port is listening but it's not our proxy
@@ -136,7 +139,7 @@ export class SingletonProxy {
           const error = err as Error;
           // ESRCH = no such process, EPERM = no permission
           if ("code" in error && (error.code === "ESRCH" || error.code === "EPERM")) {
-            console.warn(`Failed to send SIGTERM to PID ${pid}: ${error.message}`);
+            this.log.warn(`Failed to send SIGTERM to PID ${pid}: ${error.message}`);
           } else {
             throw error;
           }
@@ -158,7 +161,7 @@ export class SingletonProxy {
           } catch (err) {
             const error = err as Error;
             if ("code" in error && (error.code === "ESRCH" || error.code === "EPERM")) {
-              console.warn(`Failed to send SIGKILL to PID ${pid}: ${error.message}`);
+              this.log.warn(`Failed to send SIGKILL to PID ${pid}: ${error.message}`);
             } else {
               throw error;
             }
@@ -166,7 +169,7 @@ export class SingletonProxy {
         }
       } else {
         // PID exists but doesn't own the port - stale PID file
-        console.warn(`PID ${pid} does not own port ${this.config.proxy.port}, treating as stale`);
+        this.log.warn(`PID ${pid} does not own port ${this.config.proxy.port}, treating as stale`);
       }
     }
 
@@ -241,14 +244,14 @@ export class SingletonProxy {
     }
 
     if (lockIsStale) {
-      console.warn("Detected stale lock directory, recovering...");
+      this.log.warn("Detected stale lock directory, recovering...");
       try {
         await rmdir(this.lockDir);
         await removePidFile(this.pidFile);
-        console.warn("Stale lock recovered");
+        this.log.warn("Stale lock recovered");
       } catch (err) {
         const error = err as Error;
-        console.error(`Failed to recover stale lock: ${error.message}`);
+        this.log.error(`Failed to recover stale lock: ${error.message}`);
       }
     }
   }

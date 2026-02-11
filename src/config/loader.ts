@@ -74,10 +74,16 @@ export function getDefaultConfigPath(): string {
   return join(home, ".config", "cc-glm", "config.yml");
 }
 
+/** Result of loading configuration */
+export interface LoadConfigResult {
+  config: Config;
+  warnings: string[];
+}
+
 /**
  * Load configuration from a YAML file
  */
-export async function loadConfig(filePath: string = getDefaultConfigPath()): Promise<Config> {
+export async function loadConfig(filePath: string = getDefaultConfigPath()): Promise<LoadConfigResult> {
   let raw: RawConfig = {};
 
   // Load from file if exists
@@ -100,7 +106,7 @@ export async function loadConfig(filePath: string = getDefaultConfigPath()): Pro
 /**
  * Merge raw config with defaults, validate, and apply environment variable expansion
  */
-function mergeAndValidateConfig(raw: RawConfig): Config {
+function mergeAndValidateConfig(raw: RawConfig): LoadConfigResult {
   const config: Config = {
     proxy: mergeProxyConfig(raw.proxy),
     upstream: mergeUpstreamConfig(raw.upstream),
@@ -111,10 +117,10 @@ function mergeAndValidateConfig(raw: RawConfig): Config {
     claude: mergeClaudeConfig(raw.claude),
   };
 
-  // Validate configuration
-  validateConfig(config);
+  // Validate configuration and collect warnings
+  const warnings = validateConfig(config);
 
-  return config;
+  return { config, warnings };
 }
 
 function mergeProxyConfig(raw?: Partial<ProxyConfig>): ProxyConfig {
@@ -230,8 +236,11 @@ function mergeLoggingConfig(raw?: Partial<LoggingConfig>): LoggingConfig {
     throw new Error(`Invalid logging level: ${level}. Must be one of: ${Array.from(VALID_LOG_LEVELS).join(", ")}`);
   }
 
+  const file = raw?.file ? expandEnvVars(raw.file) : undefined;
+
   return {
     level,
+    ...(file ? { file } : {}),
   };
 }
 
@@ -310,8 +319,11 @@ function mergeClaudeConfig(raw?: Partial<ClaudeConfig>): ClaudeConfig {
 
 /**
  * Validate the complete configuration
+ * Returns an array of warning messages instead of printing them
  */
-function validateConfig(config: Config): void {
+function validateConfig(config: Config): string[] {
+  const warnings: string[] = [];
+
   // Validate URLs
   try {
     new URL(config.upstream.anthropic.url);
@@ -327,6 +339,8 @@ function validateConfig(config: Config): void {
 
   // Warn if zai API key is empty
   if (!config.upstream.zai.apiKey) {
-    console.warn("Warning: zai API key is not set. Requests to z.ai will fail without ZAI_API_KEY.");
+    warnings.push("zai API key is not set. Requests to z.ai will fail without ZAI_API_KEY.");
   }
+
+  return warnings;
 }

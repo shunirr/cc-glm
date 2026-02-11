@@ -12,6 +12,7 @@ import { selectRoute, parseRequestBody, parseRequestBodyAsObject } from "./route
 import { loadConfig } from "../config/loader.js";
 import { transformThinkingBlocks, shouldTransformResponse, shouldTransformRequest, extractAndRecordSignatures, sanitizeContentBlocksWithStore } from "./transform.js";
 import { SignatureStore } from "./signature-store.js";
+import { Logger } from "../utils/logger.js";
 
 /**
  * Hop-by-hop headers that should not be forwarded per RFC 7230
@@ -56,24 +57,30 @@ const MAX_TRANSFORM_SIZE = 50 * 1024 * 1024;
  */
 const UPSTREAM_TIMEOUT_MS = 30_000;
 
+/**
+ * Maximum body excerpt length for error logging
+ */
+const MAX_BODY_EXCERPT = 500;
+
 /** Create and start the proxy server */
-export function createProxyServer(config: Config): Server {
+export function createProxyServer(config: Config, logger: Logger): Server {
   // Create signature store with configured max size
   const maxSize = config.signatureStore?.maxSize;
   const signatureStore = new SignatureStore(maxSize);
-  console.log(`Signature store initialized with max size: ${maxSize ?? 1000}`);
+  const log = logger.child({ component: "proxy" });
+  log.info(`Signature store initialized`, { upstream: `maxSize=${maxSize ?? 1000}` });
 
   const server = createServer(async (req, res) => {
-    await handleRequest(req, res, config, signatureStore);
+    await handleRequest(req, res, config, signatureStore, logger);
   });
 
   const { port, host } = config.proxy;
   server.listen(port, host, () => {
-    console.log(`Claude Router Proxy on :${port}`);
-    console.log(`  anthropic -> ${config.upstream.anthropic.url}`);
-    console.log(`  zai       -> ${config.upstream.zai.url}`);
+    log.info(`Claude Router Proxy on :${port}`);
+    log.info(`anthropic -> ${config.upstream.anthropic.url}`);
+    log.info(`zai       -> ${config.upstream.zai.url}`);
     if (config.routing.rules.length > 0) {
-      console.log(`  routing rules: ${config.routing.rules.length}, default: ${config.routing.default}`);
+      log.info(`routing rules: ${config.routing.rules.length}, default: ${config.routing.default}`);
     }
   });
 
@@ -85,16 +92,19 @@ async function handleRequest(
   req: IncomingMessage,
   res: ServerResponse,
   config: Config,
-  signatureStore: SignatureStore
+  signatureStore: SignatureStore,
+  logger: Logger,
 ): Promise<void> {
   const reqId = Date.now().toString(36);
+  const startTime = Date.now();
+  const reqLog = logger.child({ component: "proxy", reqId });
   let requestBody: Buffer | null = null;
   let proxyReq: ReturnType<typeof httpsRequest | typeof httpRequest> | null = null;
   let isAborted = false;
 
   // Register abort handlers early to catch early disconnects
   const onAborted = () => {
-    console.log(`[${reqId}] Client aborted`);
+    reqLog.warn("Client aborted", { durationMs: Date.now() - startTime });
     isAborted = true;
     if (proxyReq) {
       proxyReq.destroy();
@@ -102,7 +112,7 @@ async function handleRequest(
   };
 
   const onError = (err: Error) => {
-    console.error(`[${reqId}] Request error: ${err.message}`);
+    reqLog.error(`Request error: ${err.message}`, { errorCode: (err as NodeJS.ErrnoException).code, durationMs: Date.now() - startTime });
     isAborted = true;
     if (proxyReq) {
       proxyReq.destroy();
@@ -146,9 +156,9 @@ async function handleRequest(
       if (parsed) {
         model = parsed.model || "no-model";
       }
-      target = selectRoute(parsed?.model, config);
+      target = selectRoute(parsed?.model, config, reqLog);
     } else {
-      target = selectRoute(undefined, config);
+      target = selectRoute(undefined, config, reqLog);
     }
 
     // Rewrite model name in request body if route specifies a different model
@@ -159,7 +169,7 @@ async function handleRequest(
         bodyObj.model = target.model;
         forwardBody = Buffer.from(JSON.stringify(bodyObj));
         bodyWasRewritten = true;
-        console.log(`[${reqId}] model rewrite: ${model} -> ${target.model}`);
+        reqLog.info(`model rewrite: ${model} -> ${target.model}`, { model: target.model });
       } else {
         forwardBody = requestBody;
       }
@@ -178,7 +188,7 @@ async function handleRequest(
         if (sanitized !== originalBody) {
           forwardBody = Buffer.from(sanitized);
           bodyWasRewritten = true;
-          console.log(`[${reqId}] sanitized request content blocks for Anthropic`);
+          reqLog.debug("sanitized request content blocks for Anthropic");
         }
       }
     }
@@ -191,7 +201,7 @@ async function handleRequest(
     const isHttps = upstreamUrl.protocol === "https:";
     const doRequest = isHttps ? httpsRequest : httpRequest;
 
-    console.log(`[${reqId}] ${method} ${reqUrl} model=${model} -> ${target.name}`);
+    reqLog.info(`${method} ${reqUrl}`, { model, upstream: target.name, method, path: reqUrl });
 
     // Prepare headers with proper filtering
     const forwardHeaders = buildForwardHeaders(req.headers, target, forwardBody, bodyWasRewritten);
@@ -206,7 +216,7 @@ async function handleRequest(
           return;
         }
 
-        console.log(`[${reqId}] <- ${proxyRes.statusCode}`);
+        const statusCode = proxyRes.statusCode || 0;
 
         // Check if we need to transform the response
         const contentType = proxyRes.headers["content-type"];
@@ -228,7 +238,7 @@ async function handleRequest(
             if (isAborted) return;
             totalSize += chunk.length;
             if (totalSize > MAX_TRANSFORM_SIZE) {
-              console.error(`[${reqId}] Transform buffer exceeded limit`);
+              reqLog.error("Transform buffer exceeded limit", { status: statusCode, durationMs: Date.now() - startTime });
               proxyRes.destroy();
               if (!res.headersSent) {
                 res.writeHead(502, { "content-type": "application/json" });
@@ -257,12 +267,21 @@ async function handleRequest(
                 processed = transformThinkingBlocks(processed);
               }
 
+              // Log non-2xx responses with body excerpt
+              const logFields = { status: statusCode, durationMs: Date.now() - startTime, upstream: target.name };
+              if (statusCode >= 400) {
+                const excerpt = body.length > MAX_BODY_EXCERPT ? body.slice(0, MAX_BODY_EXCERPT) : body;
+                reqLog.warn(`<- ${statusCode}`, { ...logFields, bodyExcerpt: excerpt });
+              } else {
+                reqLog.info(`<- ${statusCode}`, logFields);
+              }
+
               resHeaders["content-length"] = String(Buffer.byteLength(processed));
               res.writeHead(proxyRes.statusCode || 200, resHeaders);
               res.end(processed);
             } catch (err) {
               const error = err as Error;
-              console.error(`[${reqId}] Transform error: ${error.message}`);
+              reqLog.error(`Transform error: ${error.message}`, { status: statusCode, durationMs: Date.now() - startTime });
               if (!res.headersSent) {
                 res.writeHead(502, { "content-type": "application/json" });
               }
@@ -272,6 +291,15 @@ async function handleRequest(
         } else {
           req.off("aborted", onAborted);
           req.off("error", onError);
+
+          // Log response status for streaming responses
+          const logFields = { status: statusCode, durationMs: Date.now() - startTime, upstream: target.name };
+          if (statusCode >= 400) {
+            reqLog.warn(`<- ${statusCode}`, logFields);
+          } else {
+            reqLog.info(`<- ${statusCode}`, logFields);
+          }
+
           // Stream response directly without transformation
           res.writeHead(proxyRes.statusCode || 200, resHeaders);
           proxyRes.pipe(res);
@@ -282,7 +310,7 @@ async function handleRequest(
     // Set up timeout for upstream request
     if (proxyReq.setTimeout) {
       proxyReq.setTimeout(UPSTREAM_TIMEOUT_MS, () => {
-        console.error(`[${reqId}] Upstream timeout`);
+        reqLog.error("Upstream timeout", { upstream: target.name, durationMs: Date.now() - startTime, errorCode: "ETIMEDOUT" });
         isAborted = true;
         proxyReq?.destroy();
         req.off("aborted", onAborted);
@@ -297,7 +325,8 @@ async function handleRequest(
     // Handle upstream request errors
     proxyReq.on("error", (err) => {
       if (isAborted) return;
-      console.error(`[${reqId}] Upstream error: ${err.message}`);
+      const errnoErr = err as NodeJS.ErrnoException;
+      reqLog.error(`Upstream error: ${err.message}`, { upstream: target.name, errorCode: errnoErr.code, durationMs: Date.now() - startTime });
       req.off("aborted", onAborted);
       req.off("error", onError);
       if (!res.headersSent) {
@@ -309,7 +338,7 @@ async function handleRequest(
     // Handle proxy response errors
     proxyReq.on("response", (proxyRes) => {
       proxyRes.on("error", (err) => {
-        console.error(`[${reqId}] Response error: ${err.message}`);
+        reqLog.error(`Response error: ${err.message}`, { durationMs: Date.now() - startTime });
         if (!res.writableEnded) {
           res.end();
         }
@@ -323,7 +352,7 @@ async function handleRequest(
     proxyReq.end();
   } catch (err) {
     const error = err as Error;
-    console.error(`[${reqId}] ERROR: ${error.message}`);
+    reqLog.error(`ERROR: ${error.message}`, { durationMs: Date.now() - startTime });
     if (proxyReq) {
       proxyReq.destroy();
     }
@@ -499,16 +528,19 @@ function buildResponseHeaders(
 }
 
 /** Export for standalone usage */
-export async function startProxy(config: Config): Promise<Server> {
-  return createProxyServer(config);
+export async function startProxy(config: Config, logger: Logger): Promise<Server> {
+  return createProxyServer(config, logger);
 }
 
 // Start proxy if run directly
 if (import.meta.url === `file://${process.argv[1]}`) {
   loadConfig()
-    .then((config) => createProxyServer(config))
+    .then(({ config }) => {
+      const logger = new Logger(config.logging);
+      createProxyServer(config, logger);
+    })
     .catch((err) => {
-      console.error("Failed to start proxy:", err);
+      process.stderr.write(`Failed to start proxy: ${err}\n`);
       process.exit(1);
     });
 }

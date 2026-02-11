@@ -5,6 +5,7 @@
 
 import type { Config } from "../config/types.js";
 import type { Route } from "./types.js";
+import type { ChildLogger } from "../utils/logger.js";
 
 // Valid upstream names
 const VALID_UPSTREAMS = new Set(["anthropic", "zai"]);
@@ -33,13 +34,13 @@ export function isValidUpstream(name: string): boolean {
  * If model is undefined, only rules with match="*" will be applied.
  * Otherwise, falls back to default upstream.
  */
-export function selectRoute(model: string | undefined, config: Config): Route {
+export function selectRoute(model: string | undefined, config: Config, logger?: ChildLogger): Route {
   const modelToMatch = model ?? "";
 
   for (const rule of config.routing.rules) {
     // Validate upstream name at runtime
     if (!isValidUpstream(rule.upstream)) {
-      console.warn(`Invalid upstream name in routing rule: ${rule.upstream}`);
+      logger?.warn(`Invalid upstream name in routing rule: ${rule.upstream}`);
       continue;
     }
 
@@ -68,7 +69,7 @@ export function selectRoute(model: string | undefined, config: Config): Route {
 
   // Validate default upstream name
   if (!isValidUpstream(defaultName)) {
-    console.warn(`Invalid default upstream name: ${defaultName}, falling back to anthropic`);
+    logger?.warn(`Invalid default upstream name: ${defaultName}, falling back to anthropic`);
     return {
       name: "anthropic",
       url: config.upstream.anthropic.url,

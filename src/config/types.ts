@@ -44,6 +44,7 @@ export interface LifecycleConfig {
 /** Logging configuration */
 export interface LoggingConfig {
   level: "debug" | "info" | "warn" | "error";
+  file?: string; // Path to JSONL log file
 }
 
 /** Single routing rule */

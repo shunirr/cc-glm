@@ -4,6 +4,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createProxyServer } from "../../src/proxy/server.js";
+import { Logger } from "../../src/utils/logger.js";
 import type { Config } from "../../src/config/types.js";
 
 const mockConfig: Config = {
@@ -23,10 +24,11 @@ const mockConfig: Config = {
 
 describe("Proxy Server Integration", () => {
   let server: ReturnType<typeof createProxyServer>;
+  const logger = new Logger(mockConfig.logging, { stderr: false });
 
   beforeAll(() => {
     return new Promise<void>((resolve) => {
-      server = createProxyServer(mockConfig);
+      server = createProxyServer(mockConfig, logger);
       server.on("listening", () => resolve());
     });
   });
