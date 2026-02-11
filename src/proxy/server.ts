@@ -103,9 +103,15 @@ async function handleRequest(
   let proxyReq: ReturnType<typeof httpsRequest | typeof httpRequest> | null = null;
   let isAborted = false;
 
+  // Declare context variables early so error handlers can reference them via closure
+  let method: string | undefined;
+  let reqUrl: string | undefined;
+  let model: string | undefined;
+  let targetName: string | undefined;
+
   // Register abort handlers early to catch early disconnects
   const onAborted = () => {
-    reqLog.warn("Client aborted", { durationMs: Date.now() - startTime });
+    reqLog.warn("Client aborted", { method, path: reqUrl, model, upstream: targetName, durationMs: Date.now() - startTime });
     isAborted = true;
     if (proxyReq) {
       proxyReq.destroy();
@@ -113,7 +119,7 @@ async function handleRequest(
   };
 
   const onError = (err: Error) => {
-    reqLog.error(`Request error: ${err.message}`, { errorCode: (err as NodeJS.ErrnoException).code, durationMs: Date.now() - startTime });
+    reqLog.error(`Request error: ${err.message}`, { method, path: reqUrl, model, upstream: targetName, errorCode: (err as NodeJS.ErrnoException).code, durationMs: Date.now() - startTime });
     isAborted = true;
     if (proxyReq) {
       proxyReq.destroy();
@@ -125,12 +131,12 @@ async function handleRequest(
 
   try {
     // Determine if we should buffer the body based on headers
-    const method = req.method ?? "GET";
+    method = req.method ?? "GET";
     const needsBody = hasRequestBody(req);
 
     // Parse model from request body if needed
     let target: Route;
-    let model = "no-model";
+    model = "no-model";
     let bodyWasRewritten = false;
 
     if (needsBody) {
@@ -195,7 +201,8 @@ async function handleRequest(
     }
 
     // Build upstream URL (handle undefined req.url)
-    const reqUrl = req.url ?? "/";
+    reqUrl = req.url ?? "/";
+    targetName = target.name;
     const baseUrl = new URL(target.url);
     const basePath = baseUrl.pathname.replace(/\/$/, "");
     const upstreamUrl = new URL(basePath + reqUrl, baseUrl.origin);
@@ -311,7 +318,7 @@ async function handleRequest(
     // Set up timeout for upstream request
     if (proxyReq.setTimeout) {
       proxyReq.setTimeout(UPSTREAM_TIMEOUT_MS, () => {
-        reqLog.error("Upstream timeout", { upstream: target.name, durationMs: Date.now() - startTime, errorCode: "ETIMEDOUT" });
+        reqLog.error("Upstream timeout", { method, path: reqUrl, upstream: target.name, durationMs: Date.now() - startTime, errorCode: "ETIMEDOUT" });
         isAborted = true;
         proxyReq?.destroy();
         req.off("aborted", onAborted);
@@ -327,7 +334,7 @@ async function handleRequest(
     proxyReq.on("error", (err) => {
       if (isAborted) return;
       const errnoErr = err as NodeJS.ErrnoException;
-      reqLog.error(`Upstream error: ${err.message}`, { upstream: target.name, errorCode: errnoErr.code, durationMs: Date.now() - startTime });
+      reqLog.error(`Upstream error: ${err.message}`, { method, path: reqUrl, upstream: target.name, errorCode: errnoErr.code, durationMs: Date.now() - startTime });
       req.off("aborted", onAborted);
       req.off("error", onError);
       if (!res.headersSent) {
@@ -339,7 +346,7 @@ async function handleRequest(
     // Handle proxy response errors
     proxyReq.on("response", (proxyRes) => {
       proxyRes.on("error", (err) => {
-        reqLog.error(`Response error: ${err.message}`, { durationMs: Date.now() - startTime });
+        reqLog.error(`Response error: ${err.message}`, { method, path: reqUrl, upstream: target.name, status: proxyRes.statusCode, durationMs: Date.now() - startTime });
         if (!res.writableEnded) {
           res.end();
         }
@@ -353,7 +360,7 @@ async function handleRequest(
     proxyReq.end();
   } catch (err) {
     const error = err as Error;
-    reqLog.error(`ERROR: ${error.message}`, { durationMs: Date.now() - startTime });
+    reqLog.error(`ERROR: ${error.message}`, { method, path: reqUrl, model, upstream: targetName, durationMs: Date.now() - startTime });
     if (proxyReq) {
       proxyReq.destroy();
     }
