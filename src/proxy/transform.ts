@@ -246,14 +246,25 @@ export function sanitizeContentBlocksWithStore(
       return result;
     });
 
-    if (sanitized) {
-      parsed.messages = newMessages;
+    let messages = sanitized ? newMessages : parsed.messages;
+
+    // Structural validation (order matters):
+    // 1. sanitizeMessageStructure: remove leading non-user, merge consecutive same-role, remove empty
+    // 2. removeOrphanedToolResults: convert orphaned tool_results to text
+    // sanitizeMessageStructure runs first because removing leading assistant messages
+    // can create new orphaned tool_results in the following user messages.
+    const structureSanitized = sanitizeMessageStructure(messages);
+    if (structureSanitized !== messages) {
+      messages = structureSanitized;
     }
 
-    // Structural validation: remove orphaned tool_results
-    const validatedMessages = removeOrphanedToolResults(parsed.messages);
-    if (validatedMessages !== parsed.messages) {
-      parsed.messages = validatedMessages;
+    const validatedMessages = removeOrphanedToolResults(messages);
+    if (validatedMessages !== messages) {
+      messages = validatedMessages;
+    }
+
+    if (messages !== parsed.messages) {
+      parsed.messages = messages;
       return JSON.stringify(parsed);
     }
 
@@ -364,6 +375,109 @@ function sanitizeContentBlockWithStore(
   }
 
   return block;
+}
+
+/**
+ * Sanitize message structure to ensure valid Anthropic API format.
+ * Handles issues that arise from context compression:
+ * - Leading non-user messages (must start with user)
+ * - Consecutive same-role messages (must alternate user/assistant)
+ * - Empty content messages (must have non-empty content)
+ *
+ * Runs in a loop until stable since each step can introduce new issues.
+ */
+export function sanitizeMessageStructure(messages: Message[]): Message[] {
+  let current = messages;
+  let changed = false;
+
+  // Loop until no more changes (each step can create new issues)
+  let iterations = 0;
+  const MAX_ITERATIONS = 10;
+
+  while (iterations < MAX_ITERATIONS) {
+    iterations++;
+    let stepChanged = false;
+
+    // Step 1: Remove leading non-user messages
+    let startIdx = 0;
+    while (startIdx < current.length && current[startIdx].role !== "user") {
+      startIdx++;
+    }
+    if (startIdx > 0) {
+      current = current.slice(startIdx);
+      stepChanged = true;
+      changed = true;
+    }
+
+    // Step 2: Merge consecutive same-role messages
+    const merged: Message[] = [];
+    for (let i = 0; i < current.length; i++) {
+      if (merged.length > 0 && merged[merged.length - 1].role === current[i].role) {
+        // Merge into the last message
+        const prev = merged[merged.length - 1];
+        merged[merged.length - 1] = mergeMessages(prev, current[i]);
+        stepChanged = true;
+        changed = true;
+      } else {
+        merged.push(current[i]);
+      }
+    }
+    current = merged;
+
+    // Step 3: Remove empty content messages
+    const nonEmpty = current.filter((msg) => {
+      if (typeof msg.content === "string") {
+        return msg.content.length > 0;
+      }
+      if (Array.isArray(msg.content)) {
+        return msg.content.length > 0;
+      }
+      return true;
+    });
+    if (nonEmpty.length !== current.length) {
+      current = nonEmpty;
+      stepChanged = true;
+      changed = true;
+    }
+
+    // If no changes in this iteration, structure is stable
+    if (!stepChanged) {
+      break;
+    }
+  }
+
+  return changed ? current : messages;
+}
+
+/**
+ * Merge two messages with the same role into one.
+ * - Both string content: join with \n\n
+ * - Both array content: concat
+ * - Mixed: convert string to text block and concat
+ */
+function mergeMessages(a: Message, b: Message): Message {
+  const contentA = a.content;
+  const contentB = b.content;
+
+  if (typeof contentA === "string" && typeof contentB === "string") {
+    return { ...a, content: contentA + "\n\n" + contentB };
+  }
+
+  const blocksA = toContentBlocks(contentA);
+  const blocksB = toContentBlocks(contentB);
+
+  return { ...a, content: [...blocksA, ...blocksB] };
+}
+
+/**
+ * Convert content to ContentBlock array.
+ * Strings become a single text block.
+ */
+function toContentBlocks(content: string | ContentBlock[]): ContentBlock[] {
+  if (typeof content === "string") {
+    return [{ type: "text", text: content }];
+  }
+  return content;
 }
 
 /**

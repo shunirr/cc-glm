@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { transformThinkingBlocks, shouldTransformResponse, sanitizeContentBlocks, shouldTransformRequest, extractAndRecordSignatures, sanitizeContentBlocksWithStore, removeOrphanedToolResults } from "../../src/proxy/transform.js";
+import { transformThinkingBlocks, shouldTransformResponse, sanitizeContentBlocks, shouldTransformRequest, extractAndRecordSignatures, sanitizeContentBlocksWithStore, removeOrphanedToolResults, sanitizeMessageStructure } from "../../src/proxy/transform.js";
 import { SignatureStore } from "../../src/proxy/signature-store.js";
 
 describe("transformThinkingBlocks", () => {
@@ -949,6 +949,7 @@ describe("sanitizeContentBlocksWithStore", () => {
       const requestBody = JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
         messages: [
+          { role: "user", content: "Hello" },
           {
             role: "assistant",
             content: [
@@ -966,15 +967,16 @@ describe("sanitizeContentBlocksWithStore", () => {
       const parsed = JSON.parse(result);
 
       // Should be converted to text block
-      expect(parsed.messages[0].content[0].type).toBe("text");
-      expect(parsed.messages[0].content[0].text).toContain("<previous-glm-reasoning>");
-      expect(parsed.messages[0].content[0].text).toContain("Thinking from z.ai");
+      expect(parsed.messages[1].content[0].type).toBe("text");
+      expect(parsed.messages[1].content[0].text).toContain("<previous-glm-reasoning>");
+      expect(parsed.messages[1].content[0].text).toContain("Thinking from z.ai");
     });
 
     it("converts thinking blocks without signature to text blocks", () => {
       const requestBody = JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
         messages: [
+          { role: "user", content: "Hello" },
           {
             role: "assistant",
             content: [
@@ -990,15 +992,16 @@ describe("sanitizeContentBlocksWithStore", () => {
       const result = sanitizeContentBlocksWithStore(requestBody, store);
       const parsed = JSON.parse(result);
 
-      expect(parsed.messages[0].content[0].type).toBe("text");
-      expect(parsed.messages[0].content[0].text).toContain("<previous-glm-reasoning>");
-      expect(parsed.messages[0].content[0].text).toContain("Thinking without signature");
+      expect(parsed.messages[1].content[0].type).toBe("text");
+      expect(parsed.messages[1].content[0].text).toContain("<previous-glm-reasoning>");
+      expect(parsed.messages[1].content[0].text).toContain("Thinking without signature");
     });
 
     it("extracts thinking content from nested object", () => {
       const requestBody = JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
         messages: [
+          { role: "user", content: "Hello" },
           {
             role: "assistant",
             content: [
@@ -1017,8 +1020,8 @@ describe("sanitizeContentBlocksWithStore", () => {
       const result = sanitizeContentBlocksWithStore(requestBody, store);
       const parsed = JSON.parse(result);
 
-      expect(parsed.messages[0].content[0].type).toBe("text");
-      expect(parsed.messages[0].content[0].text).toContain("Nested thinking content");
+      expect(parsed.messages[1].content[0].type).toBe("text");
+      expect(parsed.messages[1].content[0].text).toContain("Nested thinking content");
     });
   });
 
@@ -1030,6 +1033,7 @@ describe("sanitizeContentBlocksWithStore", () => {
       const requestBody = JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
         messages: [
+          { role: "user", content: "Hello" },
           {
             role: "assistant",
             content: [
@@ -1047,10 +1051,10 @@ describe("sanitizeContentBlocksWithStore", () => {
       const parsed = JSON.parse(result);
 
       // Should remain as thinking block, completely unchanged
-      expect(parsed.messages[0].content[0].type).toBe("thinking");
-      expect(parsed.messages[0].content[0].content).toBe("Anthropic thinking");
+      expect(parsed.messages[1].content[0].type).toBe("thinking");
+      expect(parsed.messages[1].content[0].content).toBe("Anthropic thinking");
       // Signature MUST be preserved for Anthropic to verify
-      expect(parsed.messages[0].content[0].signature).toBe("anthropic-sig-123");
+      expect(parsed.messages[1].content[0].signature).toBe("anthropic-sig-123");
     });
 
     it("preserves thinking blocks with thinking field and recorded signature", () => {
@@ -1059,6 +1063,7 @@ describe("sanitizeContentBlocksWithStore", () => {
       const requestBody = JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
         messages: [
+          { role: "user", content: "Hello" },
           {
             role: "assistant",
             content: [
@@ -1076,7 +1081,7 @@ describe("sanitizeContentBlocksWithStore", () => {
       const parsed = JSON.parse(result);
 
       // Should be completely unchanged (Anthropic needs to verify signature)
-      expect(parsed.messages[0].content[0]).toEqual({
+      expect(parsed.messages[1].content[0]).toEqual({
         type: "thinking",
         thinking: "thinking content",
         signature: "anthropic-sig",
@@ -1092,6 +1097,7 @@ describe("sanitizeContentBlocksWithStore", () => {
       const requestBody = JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
         messages: [
+          { role: "user", content: "Hello" },
           {
             role: "assistant",
             content: [
@@ -1115,14 +1121,14 @@ describe("sanitizeContentBlocksWithStore", () => {
       const parsed = JSON.parse(result);
 
       // First block should remain thinking (Anthropic) with signature
-      expect(parsed.messages[0].content[0].type).toBe("thinking");
-      expect(parsed.messages[0].content[0].signature).toBe("anthropic-sig-1");
+      expect(parsed.messages[1].content[0].type).toBe("thinking");
+      expect(parsed.messages[1].content[0].signature).toBe("anthropic-sig-1");
       // Second block should be converted to text (z.ai, no signature)
-      expect(parsed.messages[0].content[1].type).toBe("text");
-      expect(parsed.messages[0].content[1].text).toContain("<previous-glm-reasoning>");
+      expect(parsed.messages[1].content[1].type).toBe("text");
+      expect(parsed.messages[1].content[1].text).toContain("<previous-glm-reasoning>");
       // Third block should remain text
-      expect(parsed.messages[0].content[2].type).toBe("text");
-      expect(parsed.messages[0].content[2].text).toBe("Answer");
+      expect(parsed.messages[1].content[2].type).toBe("text");
+      expect(parsed.messages[1].content[2].text).toBe("Answer");
     });
 
     it("handles multiple messages with different origins", () => {
@@ -1131,6 +1137,7 @@ describe("sanitizeContentBlocksWithStore", () => {
       const requestBody = JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
         messages: [
+          { role: "user", content: "Hello" },
           {
             role: "assistant",
             content: [
@@ -1161,12 +1168,12 @@ describe("sanitizeContentBlocksWithStore", () => {
       const result = sanitizeContentBlocksWithStore(requestBody, store);
       const parsed = JSON.parse(result);
 
-      // First message: Anthropic thinking should be preserved with signature
-      expect(parsed.messages[0].content[0].type).toBe("thinking");
-      expect(parsed.messages[0].content[0].signature).toBe("anthropic-sig-1");
-      // Third message: z.ai thinking should be converted to text
-      expect(parsed.messages[2].content[0].type).toBe("text");
-      expect(parsed.messages[2].content[0].text).toContain("<previous-glm-reasoning>");
+      // Second message: Anthropic thinking should be preserved with signature
+      expect(parsed.messages[1].content[0].type).toBe("thinking");
+      expect(parsed.messages[1].content[0].signature).toBe("anthropic-sig-1");
+      // Fourth message: z.ai thinking should be converted to text
+      expect(parsed.messages[3].content[0].type).toBe("text");
+      expect(parsed.messages[3].content[0].text).toContain("<previous-glm-reasoning>");
     });
   });
 
@@ -1177,6 +1184,7 @@ describe("sanitizeContentBlocksWithStore", () => {
       const requestBody = JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
         messages: [
+          { role: "user", content: "Hello" },
           {
             role: "assistant",
             content: [
@@ -1205,7 +1213,7 @@ describe("sanitizeContentBlocksWithStore", () => {
       const result = sanitizeContentBlocksWithStore(requestBody, store);
       const parsed = JSON.parse(result);
 
-      const toolResult = parsed.messages[1].content[0];
+      const toolResult = parsed.messages[2].content[0];
       expect(toolResult.type).toBe("tool_result");
       // Anthropic thinking should be preserved with signature
       expect(toolResult.content[0].type).toBe("thinking");
@@ -1216,6 +1224,7 @@ describe("sanitizeContentBlocksWithStore", () => {
       const requestBody = JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
         messages: [
+          { role: "user", content: "Hello" },
           {
             role: "assistant",
             content: [
@@ -1244,7 +1253,7 @@ describe("sanitizeContentBlocksWithStore", () => {
       const result = sanitizeContentBlocksWithStore(requestBody, store);
       const parsed = JSON.parse(result);
 
-      const toolResult = parsed.messages[1].content[0];
+      const toolResult = parsed.messages[2].content[0];
       expect(toolResult.type).toBe("tool_result");
       // z.ai thinking should be converted to text
       expect(toolResult.content[0].type).toBe("text");
@@ -1281,6 +1290,7 @@ describe("sanitizeContentBlocksWithStore", () => {
       const requestBody = JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
         messages: [
+          { role: "user", content: "Hello" },
           {
             role: "assistant",
             content: [
@@ -1298,9 +1308,9 @@ describe("sanitizeContentBlocksWithStore", () => {
       const parsed = JSON.parse(result);
 
       // Should be preserved as thinking block (signature implies Anthropic origin)
-      expect(parsed.messages[0].content[0].type).toBe("thinking");
-      expect(parsed.messages[0].content[0].content).toBe("Anthropic thinking after restart");
-      expect(parsed.messages[0].content[0].signature).toBe("anthropic-sig-not-in-store");
+      expect(parsed.messages[1].content[0].type).toBe("thinking");
+      expect(parsed.messages[1].content[0].content).toBe("Anthropic thinking after restart");
+      expect(parsed.messages[1].content[0].signature).toBe("anthropic-sig-not-in-store");
     });
 
     it("converts thinking blocks with thinking sub-field even when not in store", () => {
@@ -1308,6 +1318,7 @@ describe("sanitizeContentBlocksWithStore", () => {
       const requestBody = JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
         messages: [
+          { role: "user", content: "Hello" },
           {
             role: "assistant",
             content: [
@@ -1325,9 +1336,9 @@ describe("sanitizeContentBlocksWithStore", () => {
       const parsed = JSON.parse(result);
 
       // Should be converted to text (thinking sub-field is z.ai specific)
-      expect(parsed.messages[0].content[0].type).toBe("text");
-      expect(parsed.messages[0].content[0].text).toContain("<previous-glm-reasoning>");
-      expect(parsed.messages[0].content[0].text).toContain("z.ai thinking with sub-field");
+      expect(parsed.messages[1].content[0].type).toBe("text");
+      expect(parsed.messages[1].content[0].text).toContain("<previous-glm-reasoning>");
+      expect(parsed.messages[1].content[0].text).toContain("z.ai thinking with sub-field");
     });
 
     it("converts thinking blocks without signature in empty store", () => {
@@ -1335,6 +1346,7 @@ describe("sanitizeContentBlocksWithStore", () => {
       const requestBody = JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
         messages: [
+          { role: "user", content: "Hello" },
           {
             role: "assistant",
             content: [
@@ -1351,9 +1363,9 @@ describe("sanitizeContentBlocksWithStore", () => {
       const parsed = JSON.parse(result);
 
       // Should be converted to text (no signature means z.ai origin)
-      expect(parsed.messages[0].content[0].type).toBe("text");
-      expect(parsed.messages[0].content[0].text).toContain("<previous-glm-reasoning>");
-      expect(parsed.messages[0].content[0].text).toContain("z.ai thinking no signature");
+      expect(parsed.messages[1].content[0].type).toBe("text");
+      expect(parsed.messages[1].content[0].text).toContain("<previous-glm-reasoning>");
+      expect(parsed.messages[1].content[0].text).toContain("z.ai thinking no signature");
     });
   });
 
@@ -1397,6 +1409,10 @@ describe("sanitizeContentBlocksWithStore", () => {
             content: "first question",
           },
           {
+            role: "assistant",
+            content: [{ type: "text", text: "response" }],
+          },
+          {
             role: "user",
             content: [
               {
@@ -1412,14 +1428,15 @@ describe("sanitizeContentBlocksWithStore", () => {
       const result = sanitizeContentBlocksWithStore(requestBody, store);
       const parsed = JSON.parse(result);
 
-      expect(parsed.messages[1].content[0].type).toBe("text");
-      expect(parsed.messages[1].content[0].text).toContain("[previous tool result]");
+      expect(parsed.messages[2].content[0].type).toBe("text");
+      expect(parsed.messages[2].content[0].text).toContain("[previous tool result]");
     });
 
     it("converts orphaned tool_result when tool_use_id does not match", () => {
       const requestBody = JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
         messages: [
+          { role: "user", content: "Hello" },
           {
             role: "assistant",
             content: [
@@ -1442,15 +1459,16 @@ describe("sanitizeContentBlocksWithStore", () => {
       const result = sanitizeContentBlocksWithStore(requestBody, store);
       const parsed = JSON.parse(result);
 
-      expect(parsed.messages[1].content[0].type).toBe("text");
-      expect(parsed.messages[1].content[0].text).toContain("[previous tool result]");
-      expect(parsed.messages[1].content[0].text).toContain("output for wrong tool");
+      expect(parsed.messages[2].content[0].type).toBe("text");
+      expect(parsed.messages[2].content[0].text).toContain("[previous tool result]");
+      expect(parsed.messages[2].content[0].text).toContain("output for wrong tool");
     });
 
     it("preserves valid tool_result with matching tool_use in previous assistant message", () => {
       const requestBody = JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
         messages: [
+          { role: "user", content: "Hello" },
           {
             role: "assistant",
             content: [
@@ -1474,14 +1492,15 @@ describe("sanitizeContentBlocksWithStore", () => {
       const parsed = JSON.parse(result);
 
       // tool_result should be preserved
-      expect(parsed.messages[1].content[0].type).toBe("tool_result");
-      expect(parsed.messages[1].content[0].tool_use_id).toBe("toolu_valid");
+      expect(parsed.messages[2].content[0].type).toBe("tool_result");
+      expect(parsed.messages[2].content[0].tool_use_id).toBe("toolu_valid");
     });
 
     it("handles mixed valid and orphaned tool_results in same message", () => {
       const requestBody = JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
         messages: [
+          { role: "user", content: "Hello" },
           {
             role: "assistant",
             content: [
@@ -1516,17 +1535,17 @@ describe("sanitizeContentBlocksWithStore", () => {
       const parsed = JSON.parse(result);
 
       // First tool_result should be preserved
-      expect(parsed.messages[1].content[0].type).toBe("tool_result");
-      expect(parsed.messages[1].content[0].tool_use_id).toBe("toolu_valid_1");
+      expect(parsed.messages[2].content[0].type).toBe("tool_result");
+      expect(parsed.messages[2].content[0].tool_use_id).toBe("toolu_valid_1");
 
       // Second tool_result (orphaned) should be converted to text
-      expect(parsed.messages[1].content[1].type).toBe("text");
-      expect(parsed.messages[1].content[1].text).toContain("[previous tool result]");
-      expect(parsed.messages[1].content[1].text).toContain("orphaned output");
+      expect(parsed.messages[2].content[1].type).toBe("text");
+      expect(parsed.messages[2].content[1].text).toContain("[previous tool result]");
+      expect(parsed.messages[2].content[1].text).toContain("orphaned output");
 
       // Third tool_result should be preserved
-      expect(parsed.messages[1].content[2].type).toBe("tool_result");
-      expect(parsed.messages[1].content[2].tool_use_id).toBe("toolu_valid_2");
+      expect(parsed.messages[2].content[2].type).toBe("tool_result");
+      expect(parsed.messages[2].content[2].tool_use_id).toBe("toolu_valid_2");
     });
 
     it("handles tool_result with array content", () => {
@@ -1653,5 +1672,226 @@ describe("removeOrphanedToolResults", () => {
     expect(result[0].content[0].text).toBe("hello");
     expect(result[0].content[1].type).toBe("text");
     expect(result[0].content[1].text).toContain("[previous tool result]");
+  });
+});
+
+describe("sanitizeMessageStructure", () => {
+  it("removes a leading assistant message", () => {
+    const messages = [
+      { role: "assistant", content: "I am assistant" },
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: "Hi" },
+    ];
+
+    const result = sanitizeMessageStructure(messages);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].role).toBe("user");
+    expect(result[0].content).toBe("Hello");
+    expect(result[1].role).toBe("assistant");
+  });
+
+  it("removes multiple leading non-user messages", () => {
+    const messages = [
+      { role: "assistant", content: "First assistant" },
+      { role: "assistant", content: "Second assistant" },
+      { role: "user", content: "Hello" },
+    ];
+
+    const result = sanitizeMessageStructure(messages);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].role).toBe("user");
+    expect(result[0].content).toBe("Hello");
+  });
+
+  it("merges consecutive user messages with string content", () => {
+    const messages = [
+      { role: "user", content: "First question" },
+      { role: "user", content: "Second question" },
+      { role: "assistant", content: "Answer" },
+    ];
+
+    const result = sanitizeMessageStructure(messages);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].role).toBe("user");
+    expect(result[0].content).toBe("First question\n\nSecond question");
+    expect(result[1].role).toBe("assistant");
+  });
+
+  it("merges consecutive assistant messages with array content", () => {
+    const messages = [
+      { role: "user", content: "Hello" },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Part 1" }],
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Part 2" }],
+      },
+    ];
+
+    const result = sanitizeMessageStructure(messages);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].role).toBe("user");
+    expect(result[1].role).toBe("assistant");
+    expect(result[1].content).toHaveLength(2);
+    expect(result[1].content[0]).toEqual({ type: "text", text: "Part 1" });
+    expect(result[1].content[1]).toEqual({ type: "text", text: "Part 2" });
+  });
+
+  it("merges mixed string and array content by converting string to text block", () => {
+    const messages = [
+      { role: "user", content: "Text message" },
+      {
+        role: "user",
+        content: [{ type: "text", text: "Array message" }],
+      },
+      { role: "assistant", content: "Reply" },
+    ];
+
+    const result = sanitizeMessageStructure(messages);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].role).toBe("user");
+    expect(Array.isArray(result[0].content)).toBe(true);
+    expect(result[0].content).toHaveLength(2);
+    expect(result[0].content[0]).toEqual({ type: "text", text: "Text message" });
+    expect(result[0].content[1]).toEqual({ type: "text", text: "Array message" });
+  });
+
+  it("removes messages with empty string content", () => {
+    const messages = [
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: "" },
+      { role: "user", content: "Follow up" },
+    ];
+
+    const result = sanitizeMessageStructure(messages);
+
+    // After removing empty assistant, two consecutive user messages get merged
+    expect(result).toHaveLength(1);
+    expect(result[0].role).toBe("user");
+    expect(result[0].content).toBe("Hello\n\nFollow up");
+  });
+
+  it("removes messages with empty array content", () => {
+    const messages = [
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: [] },
+      { role: "user", content: "Follow up" },
+    ];
+
+    const result = sanitizeMessageStructure(messages);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].role).toBe("user");
+    expect(result[0].content).toBe("Hello\n\nFollow up");
+  });
+
+  it("does not modify valid alternating messages", () => {
+    const messages = [
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: "Hi" },
+      { role: "user", content: "Bye" },
+    ];
+
+    const result = sanitizeMessageStructure(messages);
+
+    // Should return the same reference when no changes
+    expect(result).toBe(messages);
+  });
+
+  it("returns empty array when all messages are removed", () => {
+    const messages = [
+      { role: "assistant", content: "" },
+    ];
+
+    const result = sanitizeMessageStructure(messages);
+
+    expect(result).toHaveLength(0);
+  });
+});
+
+describe("sanitizeContentBlocksWithStore - structure integration", () => {
+  let store: SignatureStore;
+
+  beforeEach(() => {
+    store = new SignatureStore(100);
+  });
+
+  it("removes leading assistant then converts orphaned tool_result in chain", () => {
+    // Scenario: context compression removed the first user message,
+    // leaving assistant at the start. The next user message has a tool_result
+    // that references a tool_use in the removed assistant message's context.
+    const requestBody = JSON.stringify({
+      model: "claude-sonnet-4-5-20250929",
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            { type: "tool_use", id: "toolu_1", name: "search", input: {} },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "toolu_1", content: "search result" },
+          ],
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "Based on the search..." }],
+        },
+        {
+          role: "user",
+          content: "Follow up question",
+        },
+      ],
+    });
+
+    const result = sanitizeContentBlocksWithStore(requestBody, store);
+    const parsed = JSON.parse(result);
+
+    // Leading assistant removed, tool_result becomes orphaned and converted to text
+    // Then consecutive user messages merged
+    expect(parsed.messages[0].role).toBe("user");
+    // The tool_result should have been converted to text (orphaned after leading assistant removal)
+    const firstContent = parsed.messages[0].content;
+    expect(Array.isArray(firstContent)).toBe(true);
+    // Should contain the converted tool_result text and the follow-up
+    const hasToolResultText = firstContent.some(
+      (block: { type: string; text?: string }) => block.type === "text" && block.text?.includes("[previous tool result]")
+    );
+    expect(hasToolResultText).toBe(true);
+  });
+
+  it("fixes all structure problems in a single pass", () => {
+    const requestBody = JSON.stringify({
+      model: "claude-sonnet-4-5-20250929",
+      messages: [
+        { role: "assistant", content: "Leading assistant" },
+        { role: "user", content: "First user" },
+        { role: "user", content: "Second user" },
+        { role: "assistant", content: "" },
+        { role: "user", content: "Third user" },
+        { role: "assistant", content: "Final answer" },
+      ],
+    });
+
+    const result = sanitizeContentBlocksWithStore(requestBody, store);
+    const parsed = JSON.parse(result);
+
+    // Leading assistant removed
+    // Consecutive users merged
+    // Empty assistant removed, causing more consecutive users to merge
+    // Final structure should be valid alternating user/assistant
+    for (let i = 0; i < parsed.messages.length - 1; i++) {
+      expect(parsed.messages[i].role).not.toBe(parsed.messages[i + 1].role);
+    }
+    expect(parsed.messages[0].role).toBe("user");
   });
 });
