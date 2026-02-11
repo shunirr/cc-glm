@@ -136,7 +136,7 @@ async function main(): Promise<void> {
   const hasClaude = await hasClaudeProcess();
   if (!hasClaude) {
     logger.info("No other Claude processes running, stopping proxy...", { component: "cli" });
-    await proxy.stopIfNoClaude(hasClaudeProcess);
+    await proxy.stopIfNoClaude();
   } else {
     logger.info("Other Claude processes still running, keeping proxy alive", { component: "cli" });
   }

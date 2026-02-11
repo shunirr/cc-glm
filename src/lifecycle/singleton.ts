@@ -20,6 +20,7 @@ import {
   execCommand,
 } from "../utils/process.js";
 import { Logger, ChildLogger } from "../utils/logger.js";
+import { hasClaudeProcess } from "./tracker.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -105,18 +106,21 @@ export class SingletonProxy {
   /**
    * Stop proxy if no Claude processes are running
    */
-  async stopIfNoClaude(hasClaude: () => Promise<boolean>): Promise<void> {
+  async stopIfNoClaude(): Promise<void> {
     const { stopGraceSeconds } = this.config.lifecycle;
 
     // Wait for grace period to ensure no new Claude processes start
     for (let i = 0; i < stopGraceSeconds; i++) {
-      if (await hasClaude()) {
+      // Use tracker with logging to see what's being detected
+      const hasClaudeProc = await hasClaudeProcess(this.log);
+      if (hasClaudeProc) {
         return; // Claude still running, don't stop
       }
       await sleep(1000);
     }
 
     // No Claude processes for grace period, stop proxy
+    this.log.info("No Claude processes detected, stopping proxy");
     await this.stop();
   }
 
