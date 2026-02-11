@@ -1,6 +1,6 @@
 {
   "name": "@shunirr/cc-glm",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Claude Code proxy for switching between Anthropic API and z.ai GLM",
   "type": "module",
   "main": "./dist/index.js",
