@@ -248,6 +248,16 @@ export function sanitizeContentBlocksWithStore(
 
     if (sanitized) {
       parsed.messages = newMessages;
+    }
+
+    // Structural validation: remove orphaned tool_results
+    const validatedMessages = removeOrphanedToolResults(parsed.messages);
+    if (validatedMessages !== parsed.messages) {
+      parsed.messages = validatedMessages;
+      return JSON.stringify(parsed);
+    }
+
+    if (sanitized) {
       return JSON.stringify(parsed);
     }
 
@@ -354,6 +364,95 @@ function sanitizeContentBlockWithStore(
   }
 
   return block;
+}
+
+/**
+ * Remove orphaned tool_result blocks from messages.
+ * An orphaned tool_result is one whose tool_use_id does not have a corresponding
+ * tool_use block in the immediately preceding assistant message.
+ * This can happen when context compression removes assistant messages containing
+ * tool_use blocks while leaving the user messages with tool_result blocks intact.
+ *
+ * Orphaned tool_result blocks are converted to text blocks to preserve context
+ * while avoiding Anthropic API validation errors.
+ */
+export function removeOrphanedToolResults(messages: Message[]): Message[] {
+  let wasModified = false;
+  const newMessages = messages.map((msg, i) => {
+    if (msg.role !== "user") return msg;
+    if (!Array.isArray(msg.content)) return msg;
+
+    // Check if any content block is a tool_result
+    const hasToolResult = msg.content.some((block) => block.type === "tool_result");
+    if (!hasToolResult) return msg;
+
+    // Collect tool_use IDs from the previous message
+    const prev = i > 0 ? messages[i - 1] : null;
+    const prevToolUseIds = new Set<string>();
+    if (prev && prev.role === "assistant" && Array.isArray(prev.content)) {
+      for (const block of prev.content) {
+        if (block.type === "tool_use" && typeof block.id === "string") {
+          prevToolUseIds.add(block.id);
+        }
+      }
+    }
+
+    let messageModified = false;
+    const newContent = msg.content.map((block) => {
+      if (block.type !== "tool_result") return block;
+
+      const toolUseId = block.tool_use_id as string | undefined;
+
+      // Check if previous message is an assistant with matching tool_use
+      const isOrphaned =
+        !prev ||
+        prev.role !== "assistant" ||
+        !toolUseId ||
+        !prevToolUseIds.has(toolUseId);
+
+      if (isOrphaned) {
+        messageModified = true;
+        return convertToolResultToText(block);
+      }
+
+      return block;
+    });
+
+    if (messageModified) {
+      wasModified = true;
+      return { ...msg, content: newContent };
+    }
+
+    return msg;
+  });
+
+  return wasModified ? newMessages : messages;
+}
+
+/**
+ * Convert a tool_result block to a text block
+ */
+function convertToolResultToText(block: ContentBlock): ContentBlock {
+  let text = "[previous tool result]";
+
+  // Extract content from tool_result if available
+  const content = block.content;
+  if (typeof content === "string" && content) {
+    text += "\n" + content;
+  } else if (Array.isArray(content)) {
+    // Extract text from nested content blocks
+    const parts: string[] = [];
+    for (const nested of content) {
+      if (nested.type === "text" && typeof nested.text === "string") {
+        parts.push(nested.text);
+      }
+    }
+    if (parts.length > 0) {
+      text += "\n" + parts.join("\n");
+    }
+  }
+
+  return { type: "text", text };
 }
 
 /**

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { transformThinkingBlocks, shouldTransformResponse, sanitizeContentBlocks, shouldTransformRequest, extractAndRecordSignatures, sanitizeContentBlocksWithStore } from "../../src/proxy/transform.js";
+import { transformThinkingBlocks, shouldTransformResponse, sanitizeContentBlocks, shouldTransformRequest, extractAndRecordSignatures, sanitizeContentBlocksWithStore, removeOrphanedToolResults } from "../../src/proxy/transform.js";
 import { SignatureStore } from "../../src/proxy/signature-store.js";
 
 describe("transformThinkingBlocks", () => {
@@ -1178,6 +1178,12 @@ describe("sanitizeContentBlocksWithStore", () => {
         model: "claude-sonnet-4-5-20250929",
         messages: [
           {
+            role: "assistant",
+            content: [
+              { type: "tool_use", id: "tool_1", name: "search", input: {} },
+            ],
+          },
+          {
             role: "user",
             content: [
               {
@@ -1199,7 +1205,7 @@ describe("sanitizeContentBlocksWithStore", () => {
       const result = sanitizeContentBlocksWithStore(requestBody, store);
       const parsed = JSON.parse(result);
 
-      const toolResult = parsed.messages[0].content[0];
+      const toolResult = parsed.messages[1].content[0];
       expect(toolResult.type).toBe("tool_result");
       // Anthropic thinking should be preserved with signature
       expect(toolResult.content[0].type).toBe("thinking");
@@ -1210,6 +1216,12 @@ describe("sanitizeContentBlocksWithStore", () => {
       const requestBody = JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
         messages: [
+          {
+            role: "assistant",
+            content: [
+              { type: "tool_use", id: "tool_1", name: "search", input: {} },
+            ],
+          },
           {
             role: "user",
             content: [
@@ -1232,7 +1244,7 @@ describe("sanitizeContentBlocksWithStore", () => {
       const result = sanitizeContentBlocksWithStore(requestBody, store);
       const parsed = JSON.parse(result);
 
-      const toolResult = parsed.messages[0].content[0];
+      const toolResult = parsed.messages[1].content[0];
       expect(toolResult.type).toBe("tool_result");
       // z.ai thinking should be converted to text
       expect(toolResult.content[0].type).toBe("text");
@@ -1343,5 +1355,303 @@ describe("sanitizeContentBlocksWithStore", () => {
       expect(parsed.messages[0].content[0].text).toContain("<previous-glm-reasoning>");
       expect(parsed.messages[0].content[0].text).toContain("z.ai thinking no signature");
     });
+  });
+
+  describe("orphaned tool_result removal", () => {
+    it("converts orphaned tool_result at the start of messages to text", () => {
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_orphaned",
+                content: "some tool output",
+              },
+            ],
+          },
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "response" }],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      const parsed = JSON.parse(result);
+
+      // tool_result should be converted to text
+      expect(parsed.messages[0].content[0].type).toBe("text");
+      expect(parsed.messages[0].content[0].text).toContain("[previous tool result]");
+      expect(parsed.messages[0].content[0].text).toContain("some tool output");
+    });
+
+    it("converts orphaned tool_result when previous message is user (not assistant)", () => {
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "user",
+            content: "first question",
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_orphaned",
+                content: "tool output",
+              },
+            ],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      const parsed = JSON.parse(result);
+
+      expect(parsed.messages[1].content[0].type).toBe("text");
+      expect(parsed.messages[1].content[0].text).toContain("[previous tool result]");
+    });
+
+    it("converts orphaned tool_result when tool_use_id does not match", () => {
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              { type: "tool_use", id: "toolu_different", name: "search", input: {} },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_orphaned",
+                content: "output for wrong tool",
+              },
+            ],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      const parsed = JSON.parse(result);
+
+      expect(parsed.messages[1].content[0].type).toBe("text");
+      expect(parsed.messages[1].content[0].text).toContain("[previous tool result]");
+      expect(parsed.messages[1].content[0].text).toContain("output for wrong tool");
+    });
+
+    it("preserves valid tool_result with matching tool_use in previous assistant message", () => {
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              { type: "tool_use", id: "toolu_valid", name: "search", input: { q: "test" } },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_valid",
+                content: "search results here",
+              },
+            ],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      const parsed = JSON.parse(result);
+
+      // tool_result should be preserved
+      expect(parsed.messages[1].content[0].type).toBe("tool_result");
+      expect(parsed.messages[1].content[0].tool_use_id).toBe("toolu_valid");
+    });
+
+    it("handles mixed valid and orphaned tool_results in same message", () => {
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              { type: "tool_use", id: "toolu_valid_1", name: "read", input: {} },
+              { type: "tool_use", id: "toolu_valid_2", name: "write", input: {} },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_valid_1",
+                content: "read output",
+              },
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_orphaned",
+                content: "orphaned output",
+              },
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_valid_2",
+                content: "write output",
+              },
+            ],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      const parsed = JSON.parse(result);
+
+      // First tool_result should be preserved
+      expect(parsed.messages[1].content[0].type).toBe("tool_result");
+      expect(parsed.messages[1].content[0].tool_use_id).toBe("toolu_valid_1");
+
+      // Second tool_result (orphaned) should be converted to text
+      expect(parsed.messages[1].content[1].type).toBe("text");
+      expect(parsed.messages[1].content[1].text).toContain("[previous tool result]");
+      expect(parsed.messages[1].content[1].text).toContain("orphaned output");
+
+      // Third tool_result should be preserved
+      expect(parsed.messages[1].content[2].type).toBe("tool_result");
+      expect(parsed.messages[1].content[2].tool_use_id).toBe("toolu_valid_2");
+    });
+
+    it("handles tool_result with array content", () => {
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_orphaned",
+                content: [
+                  { type: "text", text: "line 1" },
+                  { type: "text", text: "line 2" },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      const parsed = JSON.parse(result);
+
+      expect(parsed.messages[0].content[0].type).toBe("text");
+      expect(parsed.messages[0].content[0].text).toContain("[previous tool result]");
+      expect(parsed.messages[0].content[0].text).toContain("line 1");
+      expect(parsed.messages[0].content[0].text).toContain("line 2");
+    });
+
+    it("handles tool_result without content", () => {
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_orphaned",
+              },
+            ],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      const parsed = JSON.parse(result);
+
+      expect(parsed.messages[0].content[0].type).toBe("text");
+      expect(parsed.messages[0].content[0].text).toBe("[previous tool result]");
+    });
+
+    it("does not modify messages without tool_result blocks", () => {
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          { role: "user", content: "Hello" },
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "Hi there" }],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      // No changes expected
+      expect(result).toBe(requestBody);
+    });
+  });
+});
+
+describe("removeOrphanedToolResults", () => {
+  it("returns the same array reference when no orphaned tool_results exist", () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "toolu_1", name: "search", input: {} },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "toolu_1", content: "result" },
+        ],
+      },
+    ];
+
+    const result = removeOrphanedToolResults(messages);
+    expect(result).toBe(messages);
+  });
+
+  it("converts orphaned tool_result when no previous message exists", () => {
+    const messages = [
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "toolu_orphan", content: "output" },
+        ],
+      },
+    ];
+
+    const result = removeOrphanedToolResults(messages);
+    expect(result).not.toBe(messages);
+    expect(result[0].content[0].type).toBe("text");
+    expect(result[0].content[0].text).toContain("[previous tool result]");
+  });
+
+  it("preserves non-tool_result blocks in user messages", () => {
+    const messages = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "hello" },
+          { type: "tool_result", tool_use_id: "toolu_orphan", content: "output" },
+        ],
+      },
+    ];
+
+    const result = removeOrphanedToolResults(messages);
+    expect(result[0].content[0].type).toBe("text");
+    expect(result[0].content[0].text).toBe("hello");
+    expect(result[0].content[1].type).toBe("text");
+    expect(result[0].content[1].text).toContain("[previous tool result]");
   });
 });
