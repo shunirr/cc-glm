@@ -295,6 +295,12 @@ function sanitizeMessageWithStore(message: Message, store: SignatureStore): Mess
 /**
  * Sanitize a single content block with signature checking
  * Converts thinking blocks with unrecorded signatures to text blocks
+ *
+ * Detection logic (order matters):
+ * 1. Signature in store → keep as-is (confirmed Anthropic origin)
+ * 2. Has "thinking" sub-field → convert to text (z.ai specific structure)
+ * 3. Has non-empty signature string → keep as-is (likely Anthropic; fallback after proxy restart)
+ * 4. Otherwise → convert to text (z.ai origin, signature stripped by transformThinkingBlocks)
  */
 function sanitizeContentBlockWithStore(
   block: ContentBlock,
@@ -304,15 +310,26 @@ function sanitizeContentBlockWithStore(
   if (block.type === "thinking") {
     const signature = block.signature;
 
-    // Check if signature is recorded (Anthropic origin)
+    // 1. Signature recorded in store → confirmed Anthropic origin
     if (typeof signature === "string" && signature && store.has(signature)) {
-      // This is an Anthropic-generated thinking block, return as-is
-      // Don't modify anything - Anthropic needs to verify the signature
       return block;
-    } else {
-      // This is a z.ai-origin thinking block, convert to text
+    }
+
+    // 2. Has "thinking" sub-field → z.ai specific structure
+    if (block.thinking !== undefined) {
       return convertThinkingToText(block);
     }
+
+    // 3. Has non-empty signature string → likely Anthropic origin
+    //    After proxy restart, store is empty but Anthropic blocks retain signatures.
+    //    z.ai blocks have signatures stripped by transformThinkingBlocks, so presence
+    //    of a signature field indicates Anthropic origin.
+    if (typeof signature === "string" && signature) {
+      return block;
+    }
+
+    // 4. No signature, no thinking sub-field → z.ai origin
+    return convertThinkingToText(block);
   }
 
   // Handle tool_result blocks which may contain nested content

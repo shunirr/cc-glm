@@ -942,8 +942,8 @@ describe("sanitizeContentBlocksWithStore", () => {
   });
 
   describe("z.ai-origin thinking blocks (unrecorded signatures)", () => {
-    it("converts thinking blocks with unrecorded signatures to text blocks", () => {
-      // Add an Anthropic signature to the store
+    it("converts thinking blocks without signature to text blocks (z.ai origin)", () => {
+      // z.ai blocks have signature stripped by transformThinkingBlocks
       store.add("anthropic-sig-123");
 
       const requestBody = JSON.stringify({
@@ -955,7 +955,7 @@ describe("sanitizeContentBlocksWithStore", () => {
               {
                 type: "thinking",
                 content: "Thinking from z.ai",
-                signature: "zai-sig-456", // Not in store
+                // No signature - stripped by transformThinkingBlocks
               },
             ],
           },
@@ -1103,7 +1103,7 @@ describe("sanitizeContentBlocksWithStore", () => {
               {
                 type: "thinking",
                 content: "z.ai thinking",
-                signature: "zai-sig-2",
+                // No signature - z.ai blocks have signature stripped by transformThinkingBlocks
               },
               { type: "text", text: "Answer" },
             ],
@@ -1117,7 +1117,7 @@ describe("sanitizeContentBlocksWithStore", () => {
       // First block should remain thinking (Anthropic) with signature
       expect(parsed.messages[0].content[0].type).toBe("thinking");
       expect(parsed.messages[0].content[0].signature).toBe("anthropic-sig-1");
-      // Second block should be converted to text (z.ai)
+      // Second block should be converted to text (z.ai, no signature)
       expect(parsed.messages[0].content[1].type).toBe("text");
       expect(parsed.messages[0].content[1].text).toContain("<previous-glm-reasoning>");
       // Third block should remain text
@@ -1151,7 +1151,7 @@ describe("sanitizeContentBlocksWithStore", () => {
               {
                 type: "thinking",
                 content: "z.ai thinking",
-                signature: "zai-sig-2",
+                // No signature - z.ai blocks have signature stripped by transformThinkingBlocks
               },
             ],
           },
@@ -1220,7 +1220,7 @@ describe("sanitizeContentBlocksWithStore", () => {
                   {
                     type: "thinking",
                     content: "Nested z.ai thinking",
-                    signature: "zai-sig",
+                    // No signature - z.ai blocks have signature stripped by transformThinkingBlocks
                   },
                 ],
               },
@@ -1263,7 +1263,9 @@ describe("sanitizeContentBlocksWithStore", () => {
       expect(result).toBe(requestBody);
     });
 
-    it("handles empty store", () => {
+    it("preserves thinking blocks with signature in empty store (proxy restart fallback)", () => {
+      // After proxy restart, store is empty but Anthropic thinking blocks still have signatures.
+      // These should be preserved as-is since z.ai blocks have signatures stripped by transformThinkingBlocks.
       const requestBody = JSON.stringify({
         model: "claude-sonnet-4-5-20250929",
         messages: [
@@ -1272,8 +1274,8 @@ describe("sanitizeContentBlocksWithStore", () => {
             content: [
               {
                 type: "thinking",
-                content: "Some thinking",
-                signature: "any-sig",
+                content: "Anthropic thinking after restart",
+                signature: "anthropic-sig-not-in-store",
               },
             ],
           },
@@ -1283,8 +1285,63 @@ describe("sanitizeContentBlocksWithStore", () => {
       const result = sanitizeContentBlocksWithStore(requestBody, store);
       const parsed = JSON.parse(result);
 
-      // All signatures should be treated as z.ai-origin
+      // Should be preserved as thinking block (signature implies Anthropic origin)
+      expect(parsed.messages[0].content[0].type).toBe("thinking");
+      expect(parsed.messages[0].content[0].content).toBe("Anthropic thinking after restart");
+      expect(parsed.messages[0].content[0].signature).toBe("anthropic-sig-not-in-store");
+    });
+
+    it("converts thinking blocks with thinking sub-field even when not in store", () => {
+      // z.ai specific structure: has "thinking" sub-field
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "thinking",
+                thinking: "z.ai thinking with sub-field",
+                signature: "some-sig",
+              },
+            ],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      const parsed = JSON.parse(result);
+
+      // Should be converted to text (thinking sub-field is z.ai specific)
       expect(parsed.messages[0].content[0].type).toBe("text");
+      expect(parsed.messages[0].content[0].text).toContain("<previous-glm-reasoning>");
+      expect(parsed.messages[0].content[0].text).toContain("z.ai thinking with sub-field");
+    });
+
+    it("converts thinking blocks without signature in empty store", () => {
+      // z.ai blocks processed by transformThinkingBlocks have no signature
+      const requestBody = JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "thinking",
+                content: "z.ai thinking no signature",
+              },
+            ],
+          },
+        ],
+      });
+
+      const result = sanitizeContentBlocksWithStore(requestBody, store);
+      const parsed = JSON.parse(result);
+
+      // Should be converted to text (no signature means z.ai origin)
+      expect(parsed.messages[0].content[0].type).toBe("text");
+      expect(parsed.messages[0].content[0].text).toContain("<previous-glm-reasoning>");
+      expect(parsed.messages[0].content[0].text).toContain("z.ai thinking no signature");
     });
   });
 });
