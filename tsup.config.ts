@@ -1,7 +1,7 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/bin/cli.ts", "src/proxy/server.ts"],
+  entry: ["src/bin/cli.ts", "src/bin/cli-agent.ts", "src/proxy/server.ts"],
   format: ["esm"],
   dts: false,
   clean: true,
@@ -39,6 +39,19 @@ export default defineConfig({
       const filtered = lines.filter((line, i) => !(i < 2 && line.startsWith("#!")));
       content = "#!/usr/bin/env node\n" + filtered.join("\n");
       await writeFile(cliPath, content);
+    } catch {
+      // Ignore if file doesn't exist
+    }
+
+    // Fix cli-agent.js - ensure single hashbang
+    const cliAgentPath = join("dist", "bin", "cli-agent.js");
+    try {
+      let content = await readFile(cliAgentPath, "utf-8");
+      // Remove duplicate hashbangs
+      const lines = content.split("\n");
+      const filtered = lines.filter((line, i) => !(i < 2 && line.startsWith("#!")));
+      content = "#!/usr/bin/env node\n" + filtered.join("\n");
+      await writeFile(cliAgentPath, content);
     } catch {
       // Ignore if file doesn't exist
     }
